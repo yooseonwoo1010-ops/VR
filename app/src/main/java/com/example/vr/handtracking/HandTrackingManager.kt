@@ -75,13 +75,41 @@ class HandTrackingManager(private val context: Context) {
         val handPos = Vector3(posX, posY, posZ)
         val rayDir = Vector3(posX * 0.5f, posY * 0.5f, 1.0f).normalized()
 
+        val indexTipPos = Vector3(posX, posY + 0.12f, posZ - 0.08f)
+        val thumbTipPos = Vector3(posX + (if (isRight) -0.06f else 0.06f), posY + 0.06f, posZ - 0.04f)
+        val middleTipPos = Vector3(posX + (if (isRight) 0.03f else -0.03f), posY + 0.14f, posZ - 0.09f)
+        val ringTipPos = Vector3(posX + (if (isRight) 0.06f else -0.06f), posY + 0.11f, posZ - 0.07f)
+        val pinkyTipPos = Vector3(posX + (if (isRight) 0.09f else -0.09f), posY + 0.06f, posZ - 0.04f)
+        val wristPos = Vector3(posX, posY - 0.18f, posZ + 0.08f)
+
+        // Generate synthetic hand outline contour polygon
+        val contour = listOf(
+            wristPos,
+            Vector3(posX + (if (isRight) -0.08f else 0.08f), posY - 0.05f, posZ),
+            thumbTipPos,
+            Vector3(posX + (if (isRight) -0.02f else 0.02f), posY + 0.06f, posZ),
+            indexTipPos,
+            Vector3(posX + (if (isRight) 0.015f else -0.015f), posY + 0.09f, posZ),
+            middleTipPos,
+            Vector3(posX + (if (isRight) 0.045f else -0.045f), posY + 0.08f, posZ),
+            ringTipPos,
+            Vector3(posX + (if (isRight) 0.075f else -0.075f), posY + 0.05f, posZ),
+            pinkyTipPos,
+            Vector3(posX + (if (isRight) 0.08f else -0.08f), posY - 0.08f, posZ),
+            wristPos
+        )
+
         val updated = TrackedHand(
             isTracked = true,
             isLeft = !isRight,
             position = handPos,
-            wristPosition = Vector3(posX, posY - 0.2f, posZ + 0.1f),
-            indexTip = Vector3(posX, posY + 0.08f, posZ - 0.1f),
-            thumbTip = Vector3(posX + (if (isRight) -0.04f else 0.04f), posY + 0.04f, posZ - 0.05f),
+            wristPosition = wristPos,
+            indexTip = indexTipPos,
+            thumbTip = thumbTipPos,
+            middleTip = middleTipPos,
+            ringTip = ringTipPos,
+            pinkyTip = pinkyTipPos,
+            contourPoints = contour,
             gesture = gesture,
             confidence = 1.0f,
             laserRay = Ray3D(handPos, rayDir),

@@ -346,14 +346,38 @@ class VREnvironmentEngine(private val context: Context) {
         val clickTriggered = isClicking && !lastPinchProcessed
         lastPinchProcessed = isClicking
 
+        // Smoothly follow user gaze/head rotation so the 3D Quick Menu stays in view naturally (VR Billboard Follow)
+        val targetForward = VRMath.getForwardVector(headOrientation.pitch * 0.5f, headOrientation.yaw, 0f)
+        val targetWindowPos = targetForward * 2.0f + Vector3(0f, 0.15f, 0f)
+        val targetDockPos = targetForward * 1.8f + Vector3(0f, -0.6f, 0f)
+
+        // Smooth lerp (soft follow dampening)
+        val followSpeed = (3.5f * dt).coerceIn(0f, 1f)
+        val currentWin = _questSettings.value.anchorPos
+        val smoothWinPos = Vector3(
+            x = currentWin.x + followSpeed * (targetWindowPos.x - currentWin.x),
+            y = currentWin.y + followSpeed * (targetWindowPos.y - currentWin.y),
+            z = currentWin.z + followSpeed * (targetWindowPos.z - currentWin.z)
+        )
+
+        val currentDk = _questDock.value.anchorPos
+        val smoothDockPos = Vector3(
+            x = currentDk.x + followSpeed * (targetDockPos.x - currentDk.x),
+            y = currentDk.y + followSpeed * (targetDockPos.y - currentDk.y),
+            z = currentDk.z + followSpeed * (targetDockPos.z - currentDk.z)
+        )
+
         // Update digital clock time string & real device battery data from Android system
         val timeNow = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
         var currentSettings = _questSettings.value.copy(
+            anchorPos = smoothWinPos,
             timeString = timeNow,
             batteryPercent = realBatteryPercent,
             isCharging = isBatteryCharging
         )
-        var currentDock = _questDock.value
+        var currentDock = _questDock.value.copy(
+            anchorPos = smoothDockPos
+        )
 
         if (ray != null) {
             // 1. Raycast against Quest Quick Settings Window

@@ -54,8 +54,17 @@ class HandTrackerAnalyzer(
             var topPointY = height
             var rightPointX = 0
             var rightPointY = 0
+            var leftPointX = width
+            var leftPointY = 0
+            var bottomPointX = 0
+            var bottomPointY = 0
+
+            // Collect edge boundary sample points for real hand silhouette outline contour
+            val edgePoints = mutableListOf<Pair<Int, Int>>()
 
             for (y in 0 until height step step) {
+                var rowFirstX = -1
+                var rowLastX = -1
                 for (x in 0 until width step step) {
                     val yIndex = y * yRowStride + x
                     val uvIndex = (y / 2) * uvRowStride + (x / 2) * uvPixelStride
@@ -65,8 +74,8 @@ class HandTrackerAnalyzer(
                         val uVal = uBuffer.get(uvIndex).toInt() and 0xFF
                         val vVal = vBuffer.get(uvIndex).toInt() and 0xFF
 
-                        // YCbCr skin tone detection: Cb in [77, 127], Cr in [133, 173]
-                        if (yVal > 40 && uVal in 75..130 && vVal in 130..175) {
+                        // Adaptive YCbCr skin tone detection: supports wide lighting & hand skin tones
+                        if (yVal in 35..250 && uVal in 70..135 && vVal in 128..180) {
                             sumX += x
                             sumY += y
                             skinPixelCount++
@@ -80,17 +89,34 @@ class HandTrackerAnalyzer(
                                 topPointY = y
                                 topPointX = x
                             }
+                            if (y > bottomPointY) {
+                                bottomPointY = y
+                                bottomPointX = x
+                            }
                             if (x > rightPointX) {
                                 rightPointX = x
                                 rightPointY = y
                             }
+                            if (x < leftPointX) {
+                                leftPointX = x
+                                leftPointY = y
+                            }
+
+                            if (rowFirstX == -1) rowFirstX = x
+                            rowLastX = x
                         }
+                    }
+                }
+                if (rowFirstX != -1) {
+                    edgePoints.add(Pair(rowFirstX, y))
+                    if (rowLastX != rowFirstX) {
+                        edgePoints.add(Pair(rowLastX, y))
                     }
                 }
             }
 
             // Minimum skin area threshold (detects distinct hand)
-            val minSkinThreshold = 40
+            val minSkinThreshold = 35
             if (skinPixelCount > minSkinThreshold) {
                 val palmCenterX = (sumX / skinPixelCount).toFloat() / width
                 val palmCenterY = (sumY / skinPixelCount).toFloat() / height
@@ -101,20 +127,29 @@ class HandTrackerAnalyzer(
                 val handArea = handWidthNorm * handHeightNorm
 
                 // Estimate depth Z based on hand size in frame
-                // Closer hand = larger area = smaller Z
                 val estimatedZ = (1.8f - (handArea * 2.5f)).coerceIn(0.6f, 2.5f)
 
                 // Normalized 3D Position in camera view space
-                // Map X: [0, 1] -> [-1.2, 1.2], Y: [0, 1] -> [0.8, -0.8]
                 val posX = (palmCenterX - 0.5f) * 2.4f
                 val posY = -(palmCenterY - 0.5f) * 1.8f
                 val posZ = estimatedZ
 
-                // Fingertip points
+                // Fingertip & Hand Boundary Points
                 val indexX = (topPointX.toFloat() / width - 0.5f) * 2.4f
                 val indexY = -(topPointY.toFloat() / height - 0.5f) * 1.8f
                 val thumbX = (rightPointX.toFloat() / width - 0.5f) * 2.4f
                 val thumbY = -(rightPointY.toFloat() / height - 0.5f) * 1.8f
+                val wristX = (bottomPointX.toFloat() / width - 0.5f) * 2.4f
+                val wristY = -(bottomPointY.toFloat() / height - 0.5f) * 1.8f
+                val pinkyX = (leftPointX.toFloat() / width - 0.5f) * 2.4f
+                val pinkyY = -(leftPointY.toFloat() / height - 0.5f) * 1.8f
+
+                // Convert detected edge contour pixels to 3D world space points
+                val contour3D = edgePoints.map { (px, py) ->
+                    val cx = (px.toFloat() / width - 0.5f) * 2.4f
+                    val cy = -(py.toFloat() / height - 0.5f) * 1.8f
+                    Vector3(cx, cy, posZ)
+                }
 
                 val pinchDist = sqrt((indexX - thumbX).pow(2) + (indexY - thumbY).pow(2))
                 val isPinching = pinchDist < 0.22f || (handHeightNorm < 0.18f && handWidthNorm < 0.18f)
@@ -149,12 +184,16 @@ class HandTrackerAnalyzer(
                     isTracked = true,
                     isLeft = false,
                     position = smoothPos,
-                    wristPosition = Vector3(smoothPos.x, smoothPos.y - 0.2f, smoothPos.z + 0.1f),
-                    indexTip = Vector3(indexX, indexY, posZ - 0.1f),
-                    thumbTip = Vector3(thumbX, thumbY, posZ - 0.05f),
+                    wristPosition = Vector3(wristX, wristY, posZ + 0.08f),
+                    indexTip = Vector3(indexX, indexY, posZ - 0.08f),
+                    thumbTip = Vector3(thumbX, thumbY, posZ - 0.04f),
+                    middleTip = Vector3((indexX + pinkyX) * 0.5f, indexY + 0.03f, posZ - 0.1f),
+                    ringTip = Vector3((indexX + pinkyX * 2f) / 3f, indexY - 0.02f, posZ - 0.08f),
+                    pinkyTip = Vector3(pinkyX, pinkyY, posZ - 0.04f),
+                    contourPoints = contour3D,
                     pinchDistance = pinchDist,
                     gesture = gesture,
-                    confidence = (skinPixelCount.toFloat() / 300f).coerceIn(0.5f, 1.0f),
+                    confidence = (skinPixelCount.toFloat() / 250f).coerceIn(0.5f, 1.0f),
                     laserRay = ray,
                     isPinching = isPinching,
                     isGrabbing = gesture == HandGesture.FIST || isPinching

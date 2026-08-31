@@ -114,6 +114,10 @@ data class TrackedHand(
     val wristPosition: Vector3 = Vector3(0f, 0f, 1.5f),
     val indexTip: Vector3 = Vector3(0f, 0.1f, 1.4f),
     val thumbTip: Vector3 = Vector3(-0.05f, 0.05f, 1.4f),
+    val middleTip: Vector3 = Vector3(0.04f, 0.12f, 1.4f),
+    val ringTip: Vector3 = Vector3(0.08f, 0.09f, 1.4f),
+    val pinkyTip: Vector3 = Vector3(0.12f, 0.05f, 1.4f),
+    val contourPoints: List<Vector3> = emptyList(), // Real-time 3D hand silhouette outline points
     val pinchDistance: Float = 1.0f,
     val gesture: HandGesture = HandGesture.NONE,
     val confidence: Float = 0f,

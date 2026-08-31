@@ -185,17 +185,17 @@ object VRRenderer {
             // Title & Battery Paint
             val headerPaint = android.graphics.Paint().apply {
                 color = android.graphics.Color.WHITE
-                textSize = (scale * 0.12f).coerceIn(12f, 26f)
+                textSize = (scale * 0.11f).coerceIn(12f, 24f)
                 isAntiAlias = true
                 textAlign = android.graphics.Paint.Align.LEFT
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             }
             val pTitle = VRMath.project3DTo2D(anchor + Vector3(-halfW * 0.88f, halfH * 0.82f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
             if (pTitle.isVisible) {
-                nativeCanvas.drawText("⚙️ Quick Settings (빠른 설정)", pTitle.screenX, pTitle.screenY, headerPaint)
+                nativeCanvas.drawText("⚙️ Quick Settings", pTitle.screenX, pTitle.screenY, headerPaint)
             }
 
-            val batteryIcon = if (settings.isCharging) "⚡🔋" else "🔋"
+            val batteryIcon = if (settings.isCharging) "⚡" else "🔋"
             val statusPaint = android.graphics.Paint().apply {
                 color = if (settings.batteryPercent <= 20) {
                     android.graphics.Color.parseColor("#FF5252")
@@ -204,22 +204,22 @@ object VRRenderer {
                 } else {
                     android.graphics.Color.parseColor("#38BDF8")
                 }
-                textSize = (scale * 0.11f).coerceIn(11f, 24f)
+                textSize = (scale * 0.10f).coerceIn(10f, 22f)
                 isAntiAlias = true
                 textAlign = android.graphics.Paint.Align.RIGHT
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             }
             val pStatus = VRMath.project3DTo2D(anchor + Vector3(halfW * 0.88f, halfH * 0.82f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
             if (pStatus.isVisible) {
-                nativeCanvas.drawText("$batteryIcon ${settings.batteryPercent}%  •  🕒 ${settings.timeString}", pStatus.screenX, pStatus.screenY, statusPaint)
+                nativeCanvas.drawText("$batteryIcon ${settings.batteryPercent}%  •  ${settings.timeString}", pStatus.screenX, pStatus.screenY, statusPaint)
             }
         }
 
-        // 3. Top 3 Big Feature Cards: [Wi-Fi], [Guardian], [Quest Link] (Exact match with user image)
+        // 3. Top 3 Big Feature Cards: [Wi-Fi], [Guardian], [Quest Link]
         val tileConfigs = listOf(
-            Triple(-0.52f, "tile_wifi", Triple(if (settings.isWifiEnabled) 0xFF0284C7 else 0xFF334155, "📶 Wi-Fi", settings.wifiName)),
-            Triple(0.00f, "tile_guardian", Triple(if (settings.isGuardianEnabled) 0xFF059669 else 0xFF334155, "🛡️ Guardian", "고정 경계 (Stationary)")),
-            Triple(0.52f, "tile_link", Triple(if (settings.isQuestLinkActive) 0xFF7C3AED else 0xFF334155, "🔗 Quest Link", "Air Link / Cable"))
+            Triple(-0.52f, "tile_wifi", Triple(if (settings.isWifiEnabled) 0xFF0284C7 else 0xFF334155, "Wi-Fi", settings.wifiName)),
+            Triple(0.00f, "tile_guardian", Triple(if (settings.isGuardianEnabled) 0xFF059669 else 0xFF334155, "Guardian", "고정 경계 (Stationary)")),
+            Triple(0.52f, "tile_link", Triple(if (settings.isQuestLinkActive) 0xFF7C3AED else 0xFF334155, "Quest Link", "Air Link / Cable"))
         )
 
         for ((relX, id, data) in tileConfigs) {
@@ -283,12 +283,12 @@ object VRRenderer {
 
         // 4. Middle Row: Quick Action Round/Pill Buttons (Mic, Passthrough, Volume, Brightness, Night, Record)
         val actionButtons = listOf(
-            Triple(-0.62f, "btn_mic", if (settings.isMicMuted) "🔇 마이크" else "🎙️ 마이크"),
-            Triple(-0.38f, "btn_passthrough", if (settings.isPassthroughEnabled) "👓 MR ON" else "👓 MR OFF"),
-            Triple(-0.14f, "btn_volume", "🔊 ${((settings.volumeLevel * 100).toInt())}%"),
-            Triple(0.12f, "btn_brightness", "☀️ ${((settings.brightnessLevel * 100).toInt())}%"),
-            Triple(0.38f, "btn_night", if (settings.isNightMode) "🌙 야간 ON" else "🌙 야간 OFF"),
-            Triple(0.64f, "btn_record", if (settings.isRecording) "🔴 REC" else "⏺️ 화면 전송")
+            Triple(-0.62f, "btn_mic", if (settings.isMicMuted) "MIC OFF" else "MIC ON"),
+            Triple(-0.38f, "btn_passthrough", if (settings.isPassthroughEnabled) "PASSTHROUGH" else "VR WORLD"),
+            Triple(-0.14f, "btn_volume", "VOL ${((settings.volumeLevel * 100).toInt())}%"),
+            Triple(0.12f, "btn_brightness", "BRIGHT ${((settings.brightnessLevel * 100).toInt())}%"),
+            Triple(0.38f, "btn_night", if (settings.isNightMode) "NIGHT ON" else "NIGHT OFF"),
+            Triple(0.64f, "btn_record", if (settings.isRecording) "RECORDING" else "CAST SCREEN")
         )
 
         for ((relX, id, label) in actionButtons) {
@@ -378,9 +378,9 @@ object VRRenderer {
                 textSize = (scale * 0.095f).coerceIn(10f, 18f)
                 isAntiAlias = true
                 textAlign = android.graphics.Paint.Align.CENTER
-                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             }
-            nativeCanvas.drawText("🧭 시점 정렬 (Recenter Spatial Anchor)", pRecenter.screenX, pRecenter.screenY + scale * 0.035f, recenterPaint)
+            nativeCanvas.drawText("RECENTER VIEW (시점 정렬)", pRecenter.screenX, pRecenter.screenY + scale * 0.035f, recenterPaint)
         }
     }
 
@@ -473,13 +473,87 @@ object VRRenderer {
                     )
                 }
 
-                // App Emoji & Title
-                val emojiPaint = android.graphics.Paint().apply {
-                    textSize = (radius * 0.95f).coerceIn(12f, 30f)
-                    isAntiAlias = true
-                    textAlign = android.graphics.Paint.Align.CENTER
+                // App Icon Glyph (Crisp vector geometric glyph)
+                when (app.id) {
+                    "saber" -> {
+                        // Dual crossed sabers
+                        drawScope.drawLine(
+                            color = Color.White,
+                            start = Offset(pApp.screenX - radius * 0.45f, pApp.screenY + radius * 0.45f),
+                            end = Offset(pApp.screenX + radius * 0.45f, pApp.screenY - radius * 0.45f),
+                            strokeWidth = 2.5f
+                        )
+                        drawScope.drawLine(
+                            color = Color(0xFF00E5FF),
+                            start = Offset(pApp.screenX - radius * 0.45f, pApp.screenY - radius * 0.45f),
+                            end = Offset(pApp.screenX + radius * 0.45f, pApp.screenY + radius * 0.45f),
+                            strokeWidth = 2.5f
+                        )
+                    }
+                    "physics" -> {
+                        // 3D Cube outline glyph
+                        drawScope.drawRect(
+                            color = Color.White,
+                            topLeft = Offset(pApp.screenX - radius * 0.35f, pApp.screenY - radius * 0.35f),
+                            size = Size(radius * 0.7f, radius * 0.7f),
+                            style = Stroke(width = 2.0f)
+                        )
+                    }
+                    "space" -> {
+                        // Saturn ring planet glyph
+                        drawScope.drawCircle(
+                            color = Color.White,
+                            radius = radius * 0.35f,
+                            center = Offset(pApp.screenX, pApp.screenY)
+                        )
+                        drawScope.drawOval(
+                            color = Color(0xFF00E5FF),
+                            topLeft = Offset(pApp.screenX - radius * 0.65f, pApp.screenY - radius * 0.22f),
+                            size = Size(radius * 1.3f, radius * 0.44f),
+                            style = Stroke(width = 1.8f)
+                        )
+                    }
+                    "target" -> {
+                        // Bullseye concentric target glyph
+                        drawScope.drawCircle(
+                            color = Color.White,
+                            radius = radius * 0.45f,
+                            center = Offset(pApp.screenX, pApp.screenY),
+                            style = Stroke(width = 2.0f)
+                        )
+                        drawScope.drawCircle(
+                            color = Color.White,
+                            radius = radius * 0.18f,
+                            center = Offset(pApp.screenX, pApp.screenY)
+                        )
+                    }
+                    "passthrough" -> {
+                        // Camera / VR headset visor glyph
+                        drawScope.drawRoundRect(
+                            color = Color.White,
+                            topLeft = Offset(pApp.screenX - radius * 0.5f, pApp.screenY - radius * 0.28f),
+                            size = Size(radius * 1.0f, radius * 0.56f),
+                            cornerRadius = CornerRadius(radius * 0.2f, radius * 0.2f),
+                            style = Stroke(width = 2.0f)
+                        )
+                        drawScope.drawCircle(
+                            color = Color(0xFF00E676),
+                            radius = radius * 0.14f,
+                            center = Offset(pApp.screenX, pApp.screenY)
+                        )
+                    }
+                    else -> {
+                        // Clean initials text fallback
+                        val initialPaint = android.graphics.Paint().apply {
+                            color = android.graphics.Color.WHITE
+                            textSize = (radius * 0.75f).coerceIn(11f, 22f)
+                            isAntiAlias = true
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+                        }
+                        nativeCanvas.drawText(app.name.take(2).uppercase(), pApp.screenX, pApp.screenY + radius * 0.28f, initialPaint)
+                    }
                 }
-                nativeCanvas.drawText(app.iconEmoji, pApp.screenX, pApp.screenY + radius * 0.32f, emojiPaint)
 
                 // App Name Label below squircle
                 val namePaint = android.graphics.Paint().apply {
@@ -487,7 +561,7 @@ object VRRenderer {
                     textSize = (scale * 0.075f).coerceIn(8f, 13f)
                     isAntiAlias = true
                     textAlign = android.graphics.Paint.Align.CENTER
-                    typeface = if (isHovered) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+                    typeface = if (isHovered) android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD) else android.graphics.Typeface.SANS_SERIF
                 }
                 nativeCanvas.drawText(app.name, pApp.screenX, pApp.screenY + radius + scale * 0.07f, namePaint)
             }
@@ -523,7 +597,7 @@ object VRRenderer {
     }
 
     /**
-     * Renders the 3D Meta Quest Touch Controller and Laser Raycast
+     * Renders authentic Quest Hand Tracking (Glowing Skeleton Joints & Outline Contour) or Quest Touch Controller
      */
     private fun drawQuestTouchController(
         drawScope: DrawScope,
@@ -540,91 +614,162 @@ object VRRenderer {
     ) {
         if (!hand.isTracked) return
 
-        val handColor = Color(hand.color)
         val pHand = VRMath.project3DTo2D(hand.position, cameraPos, pitch, yaw, roll, width, height, fov)
+        if (!pHand.isVisible) return
 
-        if (pHand.isVisible) {
-            val scale = (0.1f / pHand.depth) * width * 0.35f
+        val scale = (0.1f / pHand.depth) * width * 0.35f
+        val nativeCanvas = drawScope.drawContext.canvas.nativeCanvas
 
-            // 1. Controller Grip Body (Dark ergonomic capsule)
-            drawScope.drawRoundRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(Color(0xFF334155), Color(0xFF0F172A))
-                ),
-                topLeft = Offset(pHand.screenX - scale * 0.4f, pHand.screenY),
-                size = Size(scale * 0.8f, scale * 1.8f),
-                cornerRadius = CornerRadius(scale * 0.35f, scale * 0.35f)
+        // 1. RENDER GENUINE QUEST HAND TRACKING OUTLINE & GHOST SKELETON
+        val cyanGlow = Color(0xFF00E5FF)
+        val magentaGlow = Color(0xFFFF0077)
+        val themeColor = if (isRight) cyanGlow else magentaGlow
+
+        // A. Draw Hand Silhouette / Contour Outline (Meta Quest Ghost Hand style)
+        if (hand.contourPoints.isNotEmpty()) {
+            val contourPath = Path()
+            var firstPoint = true
+            for (pt in hand.contourPoints) {
+                val proj = VRMath.project3DTo2D(pt, cameraPos, pitch, yaw, roll, width, height, fov)
+                if (proj.isVisible) {
+                    if (firstPoint) {
+                        contourPath.moveTo(proj.screenX, proj.screenY)
+                        firstPoint = false
+                    } else {
+                        contourPath.lineTo(proj.screenX, proj.screenY)
+                    }
+                }
+            }
+            // Semi-transparent hand mesh fill
+            drawScope.drawPath(
+                path = contourPath,
+                color = themeColor.copy(alpha = 0.18f)
             )
-
-            // 2. Quest Tracking Sensor Ring (Oval above grip)
-            drawScope.drawOval(
-                brush = Brush.horizontalGradient(
-                    colors = listOf(Color(0xFF475569), Color(0xFF64748B), Color(0xFF334155))
-                ),
-                topLeft = Offset(pHand.screenX - scale * 0.85f, pHand.screenY - scale * 0.7f),
-                size = Size(scale * 1.7f, scale * 0.9f),
-                style = Stroke(width = 3.5f)
+            // Glowing neon hand boundary contour stroke
+            drawScope.drawPath(
+                path = contourPath,
+                color = themeColor.copy(alpha = 0.85f),
+                style = Stroke(width = 2.2f)
             )
+        }
 
-            // Glowing Tracking Sensor Dots on Ring
+        // B. Draw Hand Bones & Skeletal Joints
+        val pWrist = VRMath.project3DTo2D(hand.wristPosition, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pIndex = VRMath.project3DTo2D(hand.indexTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pThumb = VRMath.project3DTo2D(hand.thumbTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pMiddle = VRMath.project3DTo2D(hand.middleTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pRing = VRMath.project3DTo2D(hand.ringTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pPinky = VRMath.project3DTo2D(hand.pinkyTip, cameraPos, pitch, yaw, roll, width, height, fov)
+
+        val palmCenter = pHand
+
+        // Bone lines connecting wrist to palm and fingertips
+        val joints = listOf(pThumb, pIndex, pMiddle, pRing, pPinky)
+        for (joint in joints) {
+            if (joint.isVisible && palmCenter.isVisible) {
+                // Palm to fingertip bone
+                drawScope.drawLine(
+                    color = themeColor.copy(alpha = 0.6f),
+                    start = Offset(palmCenter.screenX, palmCenter.screenY),
+                    end = Offset(joint.screenX, joint.screenY),
+                    strokeWidth = 2.0f
+                )
+                // Fingertip glowing joint sphere
+                drawScope.drawCircle(
+                    color = Color.White,
+                    radius = (scale * 0.08f).coerceIn(2.5f, 6.0f),
+                    center = Offset(joint.screenX, joint.screenY)
+                )
+                drawScope.drawCircle(
+                    color = themeColor,
+                    radius = (scale * 0.14f).coerceIn(4.0f, 10.0f),
+                    center = Offset(joint.screenX, joint.screenY),
+                    style = Stroke(width = 1.5f)
+                )
+            }
+        }
+
+        if (pWrist.isVisible && palmCenter.isVisible) {
+            // Wrist to palm base bone
+            drawScope.drawLine(
+                color = themeColor.copy(alpha = 0.7f),
+                start = Offset(pWrist.screenX, pWrist.screenY),
+                end = Offset(palmCenter.screenX, palmCenter.screenY),
+                strokeWidth = 2.8f
+            )
+            // Wrist joint ring
             drawScope.drawCircle(
-                color = handColor,
-                radius = 2.5f,
-                center = Offset(pHand.screenX - scale * 0.6f, pHand.screenY - scale * 0.35f)
+                color = themeColor,
+                radius = (scale * 0.16f).coerceIn(5.0f, 12.0f),
+                center = Offset(pWrist.screenX, pWrist.screenY),
+                style = Stroke(width = 2.0f)
             )
-            drawScope.drawCircle(
-                color = handColor,
-                radius = 2.5f,
-                center = Offset(pHand.screenX + scale * 0.6f, pHand.screenY - scale * 0.35f)
-            )
+        }
 
-            // 3. Thumbstick & Action Buttons (A/B or X/Y)
-            drawScope.drawCircle(
-                color = Color(0xFF1E293B),
-                radius = scale * 0.25f,
-                center = Offset(pHand.screenX - scale * 0.15f, pHand.screenY + scale * 0.2f)
-            )
+        // Palm Core Sensor Glow
+        drawScope.drawCircle(
+            color = if (hand.isPinching) Color.White else themeColor,
+            radius = (scale * 0.22f).coerceIn(6.0f, 16.0f),
+            center = Offset(pHand.screenX, pHand.screenY)
+        )
+        drawScope.drawCircle(
+            color = themeColor.copy(alpha = 0.5f),
+            radius = (scale * 0.35f).coerceIn(10.0f, 24.0f),
+            center = Offset(pHand.screenX, pHand.screenY),
+            style = Stroke(width = 2.0f)
+        )
+
+        // Pinch Indicator Ring when index + thumb touch
+        if (hand.isPinching && pIndex.isVisible && pThumb.isVisible) {
+            val pinchMidX = (pIndex.screenX + pThumb.screenX) * 0.5f
+            val pinchMidY = (pIndex.screenY + pThumb.screenY) * 0.5f
             drawScope.drawCircle(
                 color = Color.White,
-                radius = scale * 0.1f,
-                center = Offset(pHand.screenX + scale * 0.2f, pHand.screenY + scale * 0.15f)
+                radius = 8f,
+                center = Offset(pinchMidX, pinchMidY)
             )
+            drawScope.drawCircle(
+                color = Color(0xFF00E676),
+                radius = 16f,
+                center = Offset(pinchMidX, pinchMidY),
+                style = Stroke(width = 2.5f)
+            )
+        }
 
-            // 4. White Glowing Laser Raycast Beam from Controller Tip to Target
-            val ray = hand.laserRay
-            if (ray != null) {
-                val rayStart = hand.position + Vector3(0f, 0.05f, 0.1f)
-                val rayTarget = ray.getPoint(2.2f)
+        // 2. White Glowing Laser Raycast Beam from Index Tip / Palm to Target
+        val ray = hand.laserRay
+        if (ray != null) {
+            val rayStart = hand.position + Vector3(0f, 0.05f, 0.1f)
+            val rayTarget = ray.getPoint(2.4f)
 
-                val pRayStart = VRMath.project3DTo2D(rayStart, cameraPos, pitch, yaw, roll, width, height, fov)
-                val pRayEnd = VRMath.project3DTo2D(rayTarget, cameraPos, pitch, yaw, roll, width, height, fov)
+            val pRayStart = VRMath.project3DTo2D(rayStart, cameraPos, pitch, yaw, roll, width, height, fov)
+            val pRayEnd = VRMath.project3DTo2D(rayTarget, cameraPos, pitch, yaw, roll, width, height, fov)
 
-                if (pRayStart.isVisible && pRayEnd.isVisible) {
-                    // Glowing Laser Line (White Core with Cyan Glow)
-                    drawScope.drawLine(
-                        brush = Brush.linearGradient(
-                            colors = listOf(Color.White, Color(0xFF00E5FF).copy(alpha = 0.8f), Color(0x0000E5FF)),
-                            start = Offset(pRayStart.screenX, pRayStart.screenY),
-                            end = Offset(pRayEnd.screenX, pRayEnd.screenY)
-                        ),
+            if (pRayStart.isVisible && pRayEnd.isVisible) {
+                // Glowing Laser Line (White Core with Cyan/Magenta Glow)
+                drawScope.drawLine(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color.White, themeColor.copy(alpha = 0.9f), Color(0x00000000)),
                         start = Offset(pRayStart.screenX, pRayStart.screenY),
-                        end = Offset(pRayEnd.screenX, pRayEnd.screenY),
-                        strokeWidth = if (hand.isPinching) 4.5f else 2.5f
-                    )
+                        end = Offset(pRayEnd.screenX, pRayEnd.screenY)
+                    ),
+                    start = Offset(pRayStart.screenX, pRayStart.screenY),
+                    end = Offset(pRayEnd.screenX, pRayEnd.screenY),
+                    strokeWidth = if (hand.isPinching) 4.5f else 2.5f
+                )
 
-                    // Laser Reticle Dot on the 3D surface
-                    drawScope.drawCircle(
-                        color = Color.White,
-                        radius = if (hand.isPinching) 7f else 4.5f,
-                        center = Offset(pRayEnd.screenX, pRayEnd.screenY)
-                    )
-                    drawScope.drawCircle(
-                        color = Color(0xFF00E5FF),
-                        radius = if (hand.isPinching) 13f else 9f,
-                        center = Offset(pRayEnd.screenX, pRayEnd.screenY),
-                        style = Stroke(width = 1.8f)
-                    )
-                }
+                // Laser Reticle Dot on the 3D surface
+                drawScope.drawCircle(
+                    color = Color.White,
+                    radius = if (hand.isPinching) 7f else 4.5f,
+                    center = Offset(pRayEnd.screenX, pRayEnd.screenY)
+                )
+                drawScope.drawCircle(
+                    color = themeColor,
+                    radius = if (hand.isPinching) 14f else 9f,
+                    center = Offset(pRayEnd.screenX, pRayEnd.screenY),
+                    style = Stroke(width = 2.0f)
+                )
             }
         }
     }

@@ -85,12 +85,12 @@ fun QuestUniversalMenu(
             // Current App Title
             Text(
                 text = when (currentExperience) {
-                    VRExperience.HORIZON_HOME -> "🏠 Quest Horizon Home"
-                    VRExperience.RHYTHM_SABER -> "⚔️ Rhythm Saber"
-                    VRExperience.PHYSICS_SANDBOX -> "🎲 3D Physics Sandbox"
-                    VRExperience.SPACE_ODYSSEY -> "🪐 Space Odyssey 360"
-                    VRExperience.TARGET_SHOOTER -> "🎯 Target Range"
-                    VRExperience.PASSTHROUGH_MR -> "👓 Passthrough MR"
+                    VRExperience.HORIZON_HOME -> "Horizon Home"
+                    VRExperience.RHYTHM_SABER -> "Beat Saber VR"
+                    VRExperience.PHYSICS_SANDBOX -> "Physics 3D Lab"
+                    VRExperience.SPACE_ODYSSEY -> "Space Odyssey 360"
+                    VRExperience.TARGET_SHOOTER -> "Target Range"
+                    VRExperience.PASSTHROUGH_MR -> "Passthrough MR"
                 },
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold,
@@ -99,7 +99,7 @@ fun QuestUniversalMenu(
 
             if (score > 0) {
                 Text(
-                    text = "점수: $score",
+                    text = "SCORE: $score",
                     color = Color(0xFFFFD600),
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
@@ -108,7 +108,7 @@ fun QuestUniversalMenu(
 
             if (combo > 1) {
                 Text(
-                    text = "🔥 ${combo}x",
+                    text = "${combo}X COMBO",
                     color = Color(0xFFFF0055),
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
