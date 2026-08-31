@@ -1,0 +1,6 @@
+{
+  "name": "VR Quest Phone",
+  "description": "Transform your smartphone into an Oculus Quest 2 style VR headset with dual VR cardboard & 2D test modes and real camera hand tracking gesture controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

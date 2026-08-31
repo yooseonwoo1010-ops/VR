@@ -1,0 +1,147 @@
+package com.example.vr.handtracking
+
+import android.content.Context
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.LifecycleOwner
+import com.example.vr.model.HandGesture
+import com.example.vr.model.HandTrackingSource
+import com.example.vr.model.Ray3D
+import com.example.vr.model.TrackedHand
+import com.example.vr.model.Vector3
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.Executors
+
+class HandTrackingManager(private val context: Context) {
+
+    private val _rightHand = MutableStateFlow(
+        TrackedHand(
+            isTracked = true,
+            isLeft = false,
+            position = Vector3(0.35f, -0.25f, 1.2f),
+            laserRay = Ray3D(Vector3(0.35f, -0.25f, 1.2f), Vector3(0f, 0f, 1f)),
+            gesture = HandGesture.OPEN_PALM
+        )
+    )
+    val rightHand: StateFlow<TrackedHand> = _rightHand.asStateFlow()
+
+    private val _leftHand = MutableStateFlow(
+        TrackedHand(
+            isTracked = true,
+            isLeft = true,
+            position = Vector3(-0.35f, -0.25f, 1.2f),
+            laserRay = Ray3D(Vector3(-0.35f, -0.25f, 1.2f), Vector3(0f, 0f, 1f)),
+            gesture = HandGesture.OPEN_PALM,
+            color = 0xFFFF0077
+        )
+    )
+    val leftHand: StateFlow<TrackedHand> = _leftHand.asStateFlow()
+
+    private val _trackingSource = MutableStateFlow(HandTrackingSource.CAMERA_AI)
+    val trackingSource: StateFlow<HandTrackingSource> = _trackingSource.asStateFlow()
+
+    private val _useFrontCamera = MutableStateFlow(false)
+    val useFrontCamera: StateFlow<Boolean> = _useFrontCamera.asStateFlow()
+
+    private var cameraProvider: ProcessCameraProvider? = null
+    private val cameraExecutor = Executors.newSingleThreadExecutor()
+
+    fun setTrackingSource(source: HandTrackingSource) {
+        _trackingSource.value = source
+    }
+
+    fun toggleCameraLens() {
+        _useFrontCamera.value = !_useFrontCamera.value
+    }
+
+    /**
+     * Updates hand position and gesture via on-screen virtual hand touch controls (Simulator mode)
+     */
+    fun updateVirtualHand(
+        isRight: Boolean,
+        normX: Float, // -1f to 1f
+        normY: Float, // -1f to 1f
+        gesture: HandGesture,
+        isPinching: Boolean
+    ) {
+        val posX = normX * 0.8f + (if (isRight) 0.25f else -0.25f)
+        val posY = normY * 0.6f - 0.1f
+        val posZ = if (isPinching) 1.0f else 1.2f
+
+        val handPos = Vector3(posX, posY, posZ)
+        val rayDir = Vector3(posX * 0.5f, posY * 0.5f, 1.0f).normalized()
+
+        val updated = TrackedHand(
+            isTracked = true,
+            isLeft = !isRight,
+            position = handPos,
+            wristPosition = Vector3(posX, posY - 0.2f, posZ + 0.1f),
+            indexTip = Vector3(posX, posY + 0.08f, posZ - 0.1f),
+            thumbTip = Vector3(posX + (if (isRight) -0.04f else 0.04f), posY + 0.04f, posZ - 0.05f),
+            gesture = gesture,
+            confidence = 1.0f,
+            laserRay = Ray3D(handPos, rayDir),
+            isPinching = isPinching,
+            isGrabbing = gesture == HandGesture.FIST || isPinching,
+            color = if (isRight) 0xFF00E5FF else 0xFFFF0077
+        )
+
+        if (isRight) {
+            _rightHand.value = updated
+        } else {
+            _leftHand.value = updated
+        }
+    }
+
+    /**
+     * Start CameraX analyzer with lifecycle
+     */
+    fun startCameraTracking(lifecycleOwner: LifecycleOwner) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
+            try {
+                cameraProvider = cameraProviderFuture.get()
+                bindCameraAnalysis(lifecycleOwner)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    fun bindCameraAnalysis(lifecycleOwner: LifecycleOwner) {
+        val provider = cameraProvider ?: return
+        try {
+            provider.unbindAll()
+
+            val cameraSelector = if (_useFrontCamera.value) {
+                CameraSelector.DEFAULT_FRONT_CAMERA
+            } else {
+                CameraSelector.DEFAULT_BACK_CAMERA
+            }
+
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                .build()
+
+            imageAnalysis.setAnalyzer(cameraExecutor, HandTrackerAnalyzer { hand ->
+                if (_trackingSource.value == HandTrackingSource.CAMERA_AI) {
+                    _rightHand.value = hand
+                }
+            })
+
+            provider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun stop() {
+        cameraProvider?.unbindAll()
+        cameraExecutor.shutdown()
+    }
+}
