@@ -20,6 +20,7 @@ fun VRStereoscopicView(
     ipdMm: Float,
     fov: Float,
     experience: VRExperience,
+    vrBoxWindow: VRBoxWindowState,
     isMenuOpen: Boolean,
     questSettings: QuestQuickSettingsState,
     questDock: QuestDockState,
@@ -40,7 +41,7 @@ fun VRStereoscopicView(
     val leftEyeCameraPos = Vector3(-ipdMeters, 0f, 0f)
     val rightEyeCameraPos = Vector3(ipdMeters, 0f, 0f)
 
-    val isPassthrough = questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
+    val isPassthrough = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
 
     Box(
         modifier = modifier
@@ -65,7 +66,7 @@ fun VRStereoscopicView(
                         headOrientation = headOrientation,
                         fov = fov,
                         experience = experience,
-                        isMenuOpen = isMenuOpen,
+                        vrBoxWindow = vrBoxWindow,
                         questSettings = questSettings,
                         questDock = questDock,
                         menuCards = menuCards,
@@ -110,7 +111,7 @@ fun VRStereoscopicView(
                         headOrientation = headOrientation,
                         fov = fov,
                         experience = experience,
-                        isMenuOpen = isMenuOpen,
+                        vrBoxWindow = vrBoxWindow,
                         questSettings = questSettings,
                         questDock = questDock,
                         menuCards = menuCards,

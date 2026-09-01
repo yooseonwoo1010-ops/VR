@@ -116,7 +116,7 @@ class HandTrackerAnalyzer(
             }
 
             // Minimum skin area threshold (detects distinct hand)
-            val minSkinThreshold = 35
+            val minSkinThreshold = 30
             if (skinPixelCount > minSkinThreshold) {
                 val palmCenterX = (sumX / skinPixelCount).toFloat() / width
                 val palmCenterY = (sumY / skinPixelCount).toFloat() / height
@@ -127,32 +127,55 @@ class HandTrackerAnalyzer(
                 val handArea = handWidthNorm * handHeightNorm
 
                 // Estimate depth Z based on hand size in frame
-                val estimatedZ = (1.8f - (handArea * 2.5f)).coerceIn(0.6f, 2.5f)
+                val estimatedZ = (1.8f - (handArea * 2.2f)).coerceIn(0.7f, 2.2f)
 
                 // Normalized 3D Position in camera view space
                 val posX = (palmCenterX - 0.5f) * 2.4f
                 val posY = -(palmCenterY - 0.5f) * 1.8f
                 val posZ = estimatedZ
 
-                // Fingertip & Hand Boundary Points
-                val indexX = (topPointX.toFloat() / width - 0.5f) * 2.4f
-                val indexY = -(topPointY.toFloat() / height - 0.5f) * 1.8f
-                val thumbX = (rightPointX.toFloat() / width - 0.5f) * 2.4f
-                val thumbY = -(rightPointY.toFloat() / height - 0.5f) * 1.8f
-                val wristX = (bottomPointX.toFloat() / width - 0.5f) * 2.4f
-                val wristY = -(bottomPointY.toFloat() / height - 0.5f) * 1.8f
-                val pinkyX = (leftPointX.toFloat() / width - 0.5f) * 2.4f
-                val pinkyY = -(leftPointY.toFloat() / height - 0.5f) * 1.8f
+                // Dynamic hand dimensions in 3D
+                val spanW = (handWidthNorm * 1.2f).coerceIn(0.12f, 0.35f)
+                val spanH = (handHeightNorm * 1.2f).coerceIn(0.16f, 0.45f)
 
-                // Convert detected edge contour pixels to 3D world space points
-                val contour3D = edgePoints.map { (px, py) ->
-                    val cx = (px.toFloat() / width - 0.5f) * 2.4f
-                    val cy = -(py.toFloat() / height - 0.5f) * 1.8f
-                    Vector3(cx, cy, posZ)
-                }
+                val wristPos = Vector3(posX, posY - spanH * 0.55f, posZ + 0.05f)
+                val palmPos = Vector3(posX, posY, posZ)
 
-                val pinchDist = sqrt((indexX - thumbX).pow(2) + (indexY - thumbY).pow(2))
-                val isPinching = pinchDist < 0.22f || (handHeightNorm < 0.18f && handWidthNorm < 0.18f)
+                val thumbTipPos = Vector3(posX - spanW * 0.52f, posY + spanH * 0.12f, posZ - 0.03f)
+                val thumbBasePos = Vector3(posX - spanW * 0.32f, posY - spanH * 0.22f, posZ)
+
+                val indexTipPos = Vector3(posX - spanW * 0.20f, posY + spanH * 0.55f, posZ - 0.06f)
+                val indexKnucklePos = Vector3(posX - spanW * 0.16f, posY + spanH * 0.18f, posZ)
+
+                val middleTipPos = Vector3(posX + spanW * 0.02f, posY + spanH * 0.62f, posZ - 0.08f)
+                val middleKnucklePos = Vector3(posX + spanW * 0.02f, posY + spanH * 0.20f, posZ)
+
+                val ringTipPos = Vector3(posX + spanW * 0.22f, posY + spanH * 0.50f, posZ - 0.06f)
+                val ringKnucklePos = Vector3(posX + spanW * 0.18f, posY + spanH * 0.16f, posZ)
+
+                val pinkyTipPos = Vector3(posX + spanW * 0.42f, posY + spanH * 0.34f, posZ - 0.04f)
+                val pinkyKnucklePos = Vector3(posX + spanW * 0.32f, posY + spanH * 0.12f, posZ)
+                val pinkyBasePos = Vector3(posX + spanW * 0.32f, posY - spanH * 0.15f, posZ)
+
+                // Ordered Clockwise Hand Silhouette Contour Envelope (Clean, smooth polygon)
+                val contour3D = listOf(
+                    wristPos,
+                    thumbBasePos,
+                    thumbTipPos,
+                    indexKnucklePos,
+                    indexTipPos,
+                    middleKnucklePos,
+                    middleTipPos,
+                    ringKnucklePos,
+                    ringTipPos,
+                    pinkyKnucklePos,
+                    pinkyTipPos,
+                    pinkyBasePos,
+                    wristPos
+                )
+
+                val pinchDist = sqrt((indexTipPos.x - thumbTipPos.x).pow(2) + (indexTipPos.y - thumbTipPos.y).pow(2))
+                val isPinching = pinchDist < 0.20f || (handHeightNorm < 0.16f && handWidthNorm < 0.16f)
 
                 val gesture = when {
                     isPinching -> HandGesture.PINCH
@@ -162,34 +185,33 @@ class HandTrackerAnalyzer(
                     else -> HandGesture.OPEN_PALM
                 }
 
-                // Laser Ray shooting from palm forward
+                // Laser Ray shooting from index fingertip forward
                 val rayDir = Vector3(
-                    x = posX * 0.4f,
-                    y = posY * 0.4f,
+                    x = (indexTipPos.x - posX) * 0.6f + posX * 0.3f,
+                    y = (indexTipPos.y - posY) * 0.6f + posY * 0.3f,
                     z = 1.0f
                 ).normalized()
 
-                val handPos = Vector3(posX, posY, posZ)
-                val ray = Ray3D(origin = handPos, direction = rayDir)
+                val ray = Ray3D(origin = indexTipPos, direction = rayDir)
 
                 // Smooth coordinates with previous frame
                 val smoothFactor = 0.45f
                 val smoothPos = Vector3(
-                    x = lastTrackedHand.position.x + smoothFactor * (handPos.x - lastTrackedHand.position.x),
-                    y = lastTrackedHand.position.y + smoothFactor * (handPos.y - lastTrackedHand.position.y),
-                    z = lastTrackedHand.position.z + smoothFactor * (handPos.z - lastTrackedHand.position.z)
+                    x = lastTrackedHand.position.x + smoothFactor * (palmPos.x - lastTrackedHand.position.x),
+                    y = lastTrackedHand.position.y + smoothFactor * (palmPos.y - lastTrackedHand.position.y),
+                    z = lastTrackedHand.position.z + smoothFactor * (palmPos.z - lastTrackedHand.position.z)
                 )
 
                 val trackedHand = TrackedHand(
                     isTracked = true,
                     isLeft = false,
                     position = smoothPos,
-                    wristPosition = Vector3(wristX, wristY, posZ + 0.08f),
-                    indexTip = Vector3(indexX, indexY, posZ - 0.08f),
-                    thumbTip = Vector3(thumbX, thumbY, posZ - 0.04f),
-                    middleTip = Vector3((indexX + pinkyX) * 0.5f, indexY + 0.03f, posZ - 0.1f),
-                    ringTip = Vector3((indexX + pinkyX * 2f) / 3f, indexY - 0.02f, posZ - 0.08f),
-                    pinkyTip = Vector3(pinkyX, pinkyY, posZ - 0.04f),
+                    wristPosition = wristPos,
+                    indexTip = indexTipPos,
+                    thumbTip = thumbTipPos,
+                    middleTip = middleTipPos,
+                    ringTip = ringTipPos,
+                    pinkyTip = pinkyTipPos,
                     contourPoints = contour3D,
                     pinchDistance = pinchDist,
                     gesture = gesture,

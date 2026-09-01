@@ -21,6 +21,7 @@ fun VRFlatView(
     headOrientation: HeadOrientation,
     fov: Float,
     experience: VRExperience,
+    vrBoxWindow: VRBoxWindowState,
     isMenuOpen: Boolean,
     questSettings: QuestQuickSettingsState,
     questDock: QuestDockState,
@@ -38,7 +39,7 @@ fun VRFlatView(
     modifier: Modifier = Modifier
 ) {
     val centerCameraPos = Vector3(0f, 0f, 0f)
-    val isPassthrough = questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
+    val isPassthrough = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
 
     Box(
         modifier = modifier
@@ -64,7 +65,7 @@ fun VRFlatView(
                 headOrientation = headOrientation,
                 fov = fov,
                 experience = experience,
-                isMenuOpen = isMenuOpen,
+                vrBoxWindow = vrBoxWindow,
                 questSettings = questSettings,
                 questDock = questDock,
                 menuCards = menuCards,

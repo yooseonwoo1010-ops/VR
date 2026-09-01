@@ -55,6 +55,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
     val currentExperience by vrEngine.experience.collectAsState()
     val ipdMm by vrEngine.ipdMm.collectAsState()
     val fov by vrEngine.fov.collectAsState()
+    val vrBoxWindow by vrEngine.vrBoxWindow.collectAsState()
     val isMenuOpen by vrEngine.isMenuOpen.collectAsState()
     val questSettings by vrEngine.questSettings.collectAsState()
     val questDock by vrEngine.questDock.collectAsState()
@@ -68,17 +69,8 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
     val combo by vrEngine.combo.collectAsState()
     val lastActionText by vrEngine.lastActionText.collectAsState()
 
-    // 10-Second Auto-Hide UI Inactivity Timer & Tap to Restore
     var isUiVisible by remember { mutableStateOf(true) }
     var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
-
-    // Auto-hide UI after 10 seconds of inactivity
-    LaunchedEffect(lastInteractionTime, isUiVisible) {
-        if (isUiVisible) {
-            delay(10_000L)
-            isUiVisible = false
-        }
-    }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -130,7 +122,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    val isPassthroughActive = questSettings.isPassthroughEnabled || currentExperience == VRExperience.PASSTHROUGH_MR
+    val isPassthroughActive = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || currentExperience == VRExperience.PASSTHROUGH_MR
 
     Box(
         modifier = modifier
@@ -138,14 +130,14 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
             .background(Color.Black)
             .pointerInput(Unit) {
                 detectTapGestures {
-                    // Tap anywhere reveals the UI and resets the 10-second timer
-                    isUiVisible = true
+                    // Tap anywhere executes the aimed button action or recenters
+                    vrEngine.onScreenTap(headOrientation)
                     lastInteractionTime = System.currentTimeMillis()
                 }
             }
             .testTag("vr_main_screen")
     ) {
-        // 1. Real-World External Camera Passthrough Feed (Back/Rear Camera as background)
+        // 1. Real-Time Live External Camera Video Passthrough Feed (MR background)
         if (isPassthroughActive && hasCameraPermission) {
             CameraPassthroughView(
                 useFrontCamera = useFrontCamera,
@@ -160,6 +152,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                 ipdMm = ipdMm,
                 fov = fov,
                 experience = currentExperience,
+                vrBoxWindow = vrBoxWindow,
                 isMenuOpen = isMenuOpen,
                 questSettings = questSettings,
                 questDock = questDock,
@@ -180,6 +173,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                 headOrientation = headOrientation,
                 fov = fov,
                 experience = currentExperience,
+                vrBoxWindow = vrBoxWindow,
                 isMenuOpen = isMenuOpen,
                 questSettings = questSettings,
                 questDock = questDock,
@@ -201,124 +195,72 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        // 3. Camera Live Hand Tracking Status Badge (when in Camera AI mode)
-        if (hasCameraPermission && trackingSource == HandTrackingSource.CAMERA_AI && isUiVisible) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 12.dp, end = 12.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xDD0F172A))
-                    .border(1.dp, Color(0xFF00E5FF), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+        // 3. Clean Minimalist Top HUD Bar (Quick VR Mode Toggle & Recenter)
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 16.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xCC1E293B))
+                .border(1.dp, Color(0xFF475569), RoundedCornerShape(20.dp))
+                .padding(horizontal = 14.dp, vertical = 6.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // VR Stereoscopic / 2D Flat Mode Toggle
+                Surface(
+                    onClick = {
+                        val nextMode = if (displayMode == VRDisplayMode.CARDBOARD_VR) VRDisplayMode.FLAT_TEST else VRDisplayMode.CARDBOARD_VR
+                        vrEngine.setDisplayMode(nextMode)
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (displayMode == VRDisplayMode.CARDBOARD_VR) Color(0xFF0284C7) else Color(0xFF334155),
+                    modifier = Modifier.testTag("btn_toggle_vr_mode")
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(if (rightHand.isTracked || leftHand.isTracked) Color(0xFF00E5FF) else Color(0xFFFF9100))
-                    )
                     Text(
-                        text = if (rightHand.isTracked || leftHand.isTracked) "AI 핸드 감지됨" else "AI 핸드 탐색 중",
+                        text = if (displayMode == VRDisplayMode.CARDBOARD_VR) "🥽 VR BOX (좌우분할)" else "📱 2D 단일화면",
                         color = Color.White,
-                        fontSize = 11.sp
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                     )
                 }
-            }
-        }
 
-        // 4. Virtual Hand Controllers Overlay (in Flat mode or Simulator mode) with 10s auto-hide
-        AnimatedVisibility(
-            visible = isUiVisible && (trackingSource == HandTrackingSource.TOUCH_SIMULATOR || displayMode == VRDisplayMode.FLAT_TEST),
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.Center)
-        ) {
-            HandGestureSimulatorPanel(
-                onUpdateHand = { isRight, x, y, g, pinch ->
-                    lastInteractionTime = System.currentTimeMillis()
-                    handManager.updateVirtualHand(isRight, x, y, g, pinch)
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        // 5. Floating Quest Universal Menu & Quick Bar (Controlled by 10s auto-hide timer)
-        AnimatedVisibility(
-            visible = isUiVisible,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            QuestUniversalMenu(
-                isMenuOpen = isMenuOpen,
-                displayMode = displayMode,
-                currentExperience = currentExperience,
-                trackingSource = trackingSource,
-                useFrontCamera = useFrontCamera,
-                ipdMm = ipdMm,
-                fov = fov,
-                score = score,
-                combo = combo,
-                lastActionText = lastActionText,
-                onToggleMenu = {
-                    lastInteractionTime = System.currentTimeMillis()
-                    vrEngine.toggleMenu()
-                },
-                onSetDisplayMode = { mode ->
-                    lastInteractionTime = System.currentTimeMillis()
-                    vrEngine.setDisplayMode(mode)
-                },
-                onSelectExperience = { exp ->
-                    lastInteractionTime = System.currentTimeMillis()
-                    vrEngine.switchExperience(exp)
-                },
-                onSetTrackingSource = { src ->
-                    lastInteractionTime = System.currentTimeMillis()
-                    handManager.setTrackingSource(src)
-                },
-                onToggleCameraLens = {
-                    lastInteractionTime = System.currentTimeMillis()
-                    handManager.toggleCameraLens()
-                },
-                onSetIpd = { ipd ->
-                    lastInteractionTime = System.currentTimeMillis()
-                    vrEngine.setIpdMm(ipd)
-                },
-                onSetFov = { newFov ->
-                    lastInteractionTime = System.currentTimeMillis()
-                    vrEngine.setFov(newFov)
-                },
-                onRecenter = {
-                    lastInteractionTime = System.currentTimeMillis()
-                    headTracker.recenter()
-                    vrEngine.recenterSpatialAnchor(headOrientation)
+                // Recenter Anchor Button
+                Surface(
+                    onClick = {
+                        headTracker.recenter()
+                        vrEngine.recenterSpatialAnchor(headOrientation)
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF334155),
+                    modifier = Modifier.testTag("btn_hud_recenter")
+                ) {
+                    Text(
+                        text = "🧭 시점 정렬",
+                        color = Color(0xFF38BDF8),
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
                 }
-            )
-        }
 
-        // 6. Subtle hint badge when UI is hidden
-        AnimatedVisibility(
-            visible = !isUiVisible,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.BottomCenter)
-        ) {
-            Box(
-                modifier = Modifier
-                    .padding(bottom = 16.dp)
-                    .background(Color(0x77000000), RoundedCornerShape(16.dp))
-                    .border(1.dp, Color(0x4400E5FF), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    text = "👆 화면을 터치하면 메뉴와 컨트롤러가 다시 나타납니다 (10초 자동 숨김)",
-                    color = Color(0xCCFFFFFF),
-                    fontSize = 11.sp
-                )
+                // Passthrough Camera Toggle
+                Surface(
+                    onClick = {
+                        vrEngine.togglePassthrough()
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isPassthroughActive) Color(0xFF059669) else Color(0xFF334155),
+                    modifier = Modifier.testTag("btn_hud_passthrough")
+                ) {
+                    Text(
+                        text = if (isPassthroughActive) "📷 MR 비디오: ON" else "🌌 VR 공간모드",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
             }
         }
     }

@@ -83,12 +83,17 @@ class VREnvironmentEngine(private val context: Context) {
     private val _isMenuOpen = MutableStateFlow(true)
     val isMenuOpen: StateFlow<Boolean> = _isMenuOpen.asStateFlow()
 
+    // 3D Floating Grey Rounded-Corner Window State (VR BOX / MR System Dialog)
+    private val _vrBoxWindow = MutableStateFlow(VRBoxWindowState())
+    val vrBoxWindow: StateFlow<VRBoxWindowState> = _vrBoxWindow.asStateFlow()
+
     // 3D Spatial Quest Quick Settings & Universal Dock
-    private val _questSettings = MutableStateFlow(QuestQuickSettingsState())
+    private val _questSettings = MutableStateFlow(QuestQuickSettingsState(isVisible = false))
     val questSettings: StateFlow<QuestQuickSettingsState> = _questSettings.asStateFlow()
 
     private val _questDock = MutableStateFlow(QuestDockState())
     val questDock: StateFlow<QuestDockState> = _questDock.asStateFlow()
+
 
     // Holographic Menu Cards (Quest Home Dashboard)
     private val _menuCards = MutableStateFlow(
@@ -172,6 +177,8 @@ class VREnvironmentEngine(private val context: Context) {
 
     private val _lastActionText = MutableStateFlow("손 제스처(핀치/가리키기)로 조작하세요")
     val lastActionText: StateFlow<String> = _lastActionText.asStateFlow()
+
+    private var lastPinchProcessed = false
 
     private var grabbedPhysicsId: Long? = null
 
@@ -312,17 +319,11 @@ class VREnvironmentEngine(private val context: Context) {
         updateParticles(deltaTime)
 
         // Always update 3D Quest Quick Settings & Universal Dock Spatial Interactions
-        updateQuickSettingsAndDock(deltaTime, rightHand, leftHand, headOrientation)
-
-        // Check if hand gesture is PALM_MENU to summon menu
-        if (rightHand.gesture == HandGesture.PALM_MENU || leftHand.gesture == HandGesture.PALM_MENU) {
-            if (!_isMenuOpen.value) {
-                _isMenuOpen.value = true
-                triggerHaptic(30)
-            }
-        }
+        // Update 3D Floating Grey Spatial Window (Gaze aiming & dwell selection)
+        updateVRBoxWindow(deltaTime, headOrientation)
 
         // Handle active experience update
+
         when (_experience.value) {
             VRExperience.HORIZON_HOME -> updateHomeMenu(rightHand, leftHand)
             VRExperience.RHYTHM_SABER -> updateRhythmSaber(deltaTime, rightHand, leftHand)
@@ -333,7 +334,138 @@ class VREnvironmentEngine(private val context: Context) {
         }
     }
 
-    private var lastPinchProcessed = false
+    /**
+     * Updates Gaze Raycasting & Interactive selection on the 3D Floating Grey Window
+     */
+    private fun updateVRBoxWindow(
+        dt: Float,
+        headOrientation: HeadOrientation
+    ) {
+        val currentWin = _vrBoxWindow.value
+        if (!currentWin.isVisible) return
+
+        // Gaze Ray starting from head camera looking forward
+        val forwardDir = VRMath.getForwardVector(headOrientation.pitch, headOrientation.yaw, headOrientation.roll)
+        val gazeRay = Ray3D(origin = Vector3(0f, 0f, 0f), direction = forwardDir)
+
+        val windowPos = currentWin.anchorPos
+        val hitT = VRMath.rayIntersectsQuad(
+            ray = gazeRay,
+            quadCenter = windowPos,
+            quadNormal = (Vector3(0f, 0f, 0f) - windowPos).normalized(),
+            width = currentWin.width,
+            height = currentWin.height
+        )
+
+        var newHoveredId: String? = null
+        if (hitT != null) {
+            val hitPoint = gazeRay.getPoint(hitT)
+            val localX = hitPoint.x - windowPos.x
+            val localY = hitPoint.y - windowPos.y
+
+            // Bottom Buttons Row (Y: -0.42 to -0.18)
+            if (localY in -0.45f..-0.15f) {
+                if (localX in -0.75f..-0.38f) {
+                    newHoveredId = "btn_recenter"
+                } else if (localX in -0.38f..0.00f) {
+                    newHoveredId = "btn_passthrough"
+                } else if (localX in 0.00f..0.38f) {
+                    newHoveredId = "btn_ipd"
+                } else if (localX in 0.38f..0.75f) {
+                    newHoveredId = "btn_proceed"
+                }
+            }
+        }
+
+        var newDwell = currentWin.gazeDwellProgress
+        if (newHoveredId != null) {
+            if (newHoveredId == currentWin.hoveredButtonId) {
+                newDwell += dt * 0.9f // ~1.1 seconds dwell to click
+                if (newDwell >= 1.0f) {
+                    // Trigger action on dwell completion
+                    executeButtonAction(newHoveredId, headOrientation)
+                    newDwell = 0f
+                }
+            } else {
+                newDwell = 0f
+                triggerHaptic(20)
+            }
+        } else {
+            newDwell = (newDwell - dt * 2.0f).coerceAtLeast(0f)
+        }
+
+        _vrBoxWindow.value = currentWin.copy(
+            hoveredButtonId = newHoveredId,
+            gazeDwellProgress = newDwell.coerceIn(0f, 1f),
+            ipdMm = _ipdMm.value,
+            isDisplayStereo = (_displayMode.value == VRDisplayMode.CARDBOARD_VR)
+        )
+    }
+
+    /**
+     * Executes the button click from Gaze Dwell or Direct Screen Tap
+     */
+    fun executeButtonAction(buttonId: String, headOrientation: HeadOrientation) {
+        when (buttonId) {
+            "btn_recenter" -> {
+                recenterVRWindow(headOrientation)
+                _lastActionText.value = "🧭 3D 공간 시점 정렬 완료"
+                triggerHaptic(50)
+            }
+            "btn_passthrough" -> {
+                val nextState = !_vrBoxWindow.value.isPassthroughActive
+                _vrBoxWindow.value = _vrBoxWindow.value.copy(isPassthroughActive = nextState)
+                _lastActionText.value = if (nextState) "📷 실시간 외부 카메라 MR 비디오 켜짐" else "🌌 3D 가상 공간 배경 전환"
+                triggerHaptic(40)
+            }
+            "btn_ipd" -> {
+                val nextIpd = when (_ipdMm.value) {
+                    58f -> 64f
+                    64f -> 70f
+                    else -> 58f
+                }
+                setIpdMm(nextIpd)
+                _lastActionText.value = "👓 VR BOX 동공 거리 (IPD): ${nextIpd.toInt()}mm"
+                triggerHaptic(35)
+            }
+            "btn_proceed" -> {
+                _lastActionText.value = "✓ Spatial MR 세션 준비 완료!"
+                triggerHaptic(80)
+            }
+        }
+    }
+
+    /**
+     * Screen Tap handler: clicks currently hovered button or recenters window
+     */
+    fun onScreenTap(headOrientation: HeadOrientation) {
+        val hovered = _vrBoxWindow.value.hoveredButtonId
+        if (hovered != null) {
+            executeButtonAction(hovered, headOrientation)
+        } else {
+            recenterVRWindow(headOrientation)
+            _lastActionText.value = "🧭 시점 정렬됨 (화면 터치)"
+            triggerHaptic(30)
+        }
+    }
+
+    /**
+     * Smoothly recenters the 3D window in front of current gaze direction
+     */
+    fun recenterVRWindow(headOrientation: HeadOrientation) {
+        val forwardDir = VRMath.getForwardVector(headOrientation.pitch * 0.5f, headOrientation.yaw, 0f)
+        val newAnchor = forwardDir * 2.0f
+        _vrBoxWindow.value = _vrBoxWindow.value.copy(anchorPos = newAnchor)
+        spawnBurstParticles(newAnchor, 0xFF60A5FA, 20)
+    }
+
+    fun togglePassthrough() {
+        val next = !_vrBoxWindow.value.isPassthroughActive
+        _vrBoxWindow.value = _vrBoxWindow.value.copy(isPassthroughActive = next)
+        _questSettings.value = _questSettings.value.copy(isPassthroughEnabled = next)
+        _lastActionText.value = if (next) "📷 실시간 MR 비디오 모드 ON" else "🌌 VR 공간 모드 ON"
+        triggerHaptic(40)
+    }
 
     private fun updateQuickSettingsAndDock(
         dt: Float,

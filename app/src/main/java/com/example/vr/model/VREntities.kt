@@ -97,8 +97,38 @@ data class VRParticle(
 )
 
 /**
- * 3D Quest Quick Settings & Universal Dock Spatial State
+ * 3D Floating Grey Rounded-Corner Spatial Window (VR Box / MR Headset dialog as in user image)
  */
+data class VRBoxWindowState(
+    var anchorPos: Vector3 = Vector3(0f, 0f, 2.0f),
+    var width: Float = 1.6f,
+    var height: Float = 1.05f,
+    var title: String = "VR BOX Spatial Mixed Reality",
+    var subtitle: String = "Real-Time Video Passthrough & 6-DoF Head Tracking",
+    var messageLines: List<String> = listOf(
+        "• 실시간 스마트폰 외부 카메라 비디오를 배경으로 3D 공간 창이 표시됩니다.",
+        "• 스마트폰을 VR BOX 헤드셋에 장착하고 머리를 움직여 둘러보세요.",
+        "• 화면 중앙의 시선 조준점(Gaze Reticle)을 버튼에 맞추거나 화면을 터치하세요."
+    ),
+    var isPassthroughActive: Boolean = true,
+    var ipdMm: Float = 64f,
+    var isDisplayStereo: Boolean = true,
+    var hoveredButtonId: String? = null,
+    var gazeDwellProgress: Float = 0f,
+    var isVisible: Boolean = true
+)
+
+data class VRBoxButton(
+    val id: String,
+    val label: String,
+    val relX: Float,
+    val relY: Float,
+    val width: Float,
+    val height: Float,
+    val isPrimary: Boolean = false,
+    val isAccent: Boolean = false
+)
+
 data class QuestQuickSettingsState(
     var anchorPos: Vector3 = Vector3(0f, 0.2f, 2.0f),
     var width: Float = 1.7f,
