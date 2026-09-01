@@ -337,6 +337,9 @@ class VREnvironmentEngine(private val context: Context) {
     /**
      * Updates Gaze Raycasting & Interactive selection on the 3D Floating Grey Window
      */
+    /**
+     * Updates Gaze Reticle & Interactive selection on the Fixed Grey Window
+     */
     private fun updateVRBoxWindow(
         dt: Float,
         headOrientation: HeadOrientation
@@ -344,36 +347,19 @@ class VREnvironmentEngine(private val context: Context) {
         val currentWin = _vrBoxWindow.value
         if (!currentWin.isVisible) return
 
-        // Gaze Ray starting from head camera looking forward
-        val forwardDir = VRMath.getForwardVector(headOrientation.pitch, headOrientation.yaw, headOrientation.roll)
-        val gazeRay = Ray3D(origin = Vector3(0f, 0f, 0f), direction = forwardDir)
-
-        val windowPos = currentWin.anchorPos
-        val hitT = VRMath.rayIntersectsQuad(
-            ray = gazeRay,
-            quadCenter = windowPos,
-            quadNormal = (Vector3(0f, 0f, 0f) - windowPos).normalized(),
-            width = currentWin.width,
-            height = currentWin.height
-        )
-
+        // Gaze is naturally centered in head-locked view
+        // Buttons are in lower section
         var newHoveredId: String? = null
-        if (hitT != null) {
-            val hitPoint = gazeRay.getPoint(hitT)
-            val localX = hitPoint.x - windowPos.x
-            val localY = hitPoint.y - windowPos.y
+        val pitch = headOrientation.pitch
+        val yaw = headOrientation.yaw
 
-            // Bottom Buttons Row (Y: -0.42 to -0.18)
-            if (localY in -0.45f..-0.15f) {
-                if (localX in -0.75f..-0.38f) {
-                    newHoveredId = "btn_recenter"
-                } else if (localX in -0.38f..0.00f) {
-                    newHoveredId = "btn_passthrough"
-                } else if (localX in 0.00f..0.38f) {
-                    newHoveredId = "btn_ipd"
-                } else if (localX in 0.38f..0.75f) {
-                    newHoveredId = "btn_proceed"
-                }
+        // When looking down slightly (pitch ~ -10 deg to -28 deg):
+        if (pitch in -0.50f..-0.10f) {
+            when {
+                yaw < -0.20f -> newHoveredId = "btn_recenter"
+                yaw in -0.20f..0.00f -> newHoveredId = "btn_passthrough"
+                yaw in 0.00f..0.20f -> newHoveredId = "btn_ipd"
+                yaw > 0.20f -> newHoveredId = "btn_proceed"
             }
         }
 
@@ -409,14 +395,11 @@ class VREnvironmentEngine(private val context: Context) {
         when (buttonId) {
             "btn_recenter" -> {
                 recenterVRWindow(headOrientation)
-                _lastActionText.value = "🧭 3D 공간 시점 정렬 완료"
+                _lastActionText.value = "🧭 시점 정렬 완료"
                 triggerHaptic(50)
             }
             "btn_passthrough" -> {
-                val nextState = !_vrBoxWindow.value.isPassthroughActive
-                _vrBoxWindow.value = _vrBoxWindow.value.copy(isPassthroughActive = nextState)
-                _lastActionText.value = if (nextState) "📷 실시간 외부 카메라 MR 비디오 켜짐" else "🌌 3D 가상 공간 배경 전환"
-                triggerHaptic(40)
+                togglePassthrough()
             }
             "btn_ipd" -> {
                 val nextIpd = when (_ipdMm.value) {
@@ -436,7 +419,36 @@ class VREnvironmentEngine(private val context: Context) {
     }
 
     /**
-     * Screen Tap handler: clicks currently hovered button or recenters window
+     * Direct Screen Tap handler: checks if a specific button was tapped by touch coordinates
+     */
+    fun onScreenTouchPosition(x: Float, y: Float, screenWidth: Float, screenHeight: Float, headOrientation: HeadOrientation) {
+        val isStereo = (_displayMode.value == VRDisplayMode.CARDBOARD_VR)
+        val eyeWidth = if (isStereo) screenWidth * 0.5f else screenWidth
+        val localX = if (isStereo && x >= eyeWidth) x - eyeWidth else x
+        val normX = (localX / eyeWidth).coerceIn(0f, 1f)
+        val normY = (y / screenHeight).coerceIn(0f, 1f)
+
+        // Check if bottom action buttons area was tapped
+        if (normY in 0.62f..0.92f) {
+            val buttonId = when {
+                normX in 0.04f..0.26f -> "btn_recenter"
+                normX in 0.27f..0.49f -> "btn_passthrough"
+                normX in 0.50f..0.72f -> "btn_ipd"
+                normX in 0.73f..0.96f -> "btn_proceed"
+                else -> null
+            }
+            if (buttonId != null) {
+                executeButtonAction(buttonId, headOrientation)
+                return
+            }
+        }
+
+        // Tap outside buttons toggles passthrough or recenters
+        onScreenTap(headOrientation)
+    }
+
+    /**
+     * Screen Tap fallback handler
      */
     fun onScreenTap(headOrientation: HeadOrientation) {
         val hovered = _vrBoxWindow.value.hoveredButtonId

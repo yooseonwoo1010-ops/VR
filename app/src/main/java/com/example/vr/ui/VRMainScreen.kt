@@ -124,14 +124,15 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
 
     val isPassthroughActive = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || currentExperience == VRExperience.PASSTHROUGH_MR
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
             .pointerInput(Unit) {
-                detectTapGestures {
-                    // Tap anywhere executes the aimed button action or recenters
-                    vrEngine.onScreenTap(headOrientation)
+                detectTapGestures { offset ->
+                    val screenW = size.width.toFloat()
+                    val screenH = size.height.toFloat()
+                    vrEngine.onScreenTouchPosition(offset.x, offset.y, screenW, screenH, headOrientation)
                     lastInteractionTime = System.currentTimeMillis()
                 }
             }
