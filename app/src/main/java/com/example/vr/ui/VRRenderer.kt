@@ -7,6 +7,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import com.example.vr.engine.VRMath
 import com.example.vr.model.*
 import com.example.vr.tracking.HeadOrientation
@@ -53,15 +54,23 @@ object VRRenderer {
             drawPassthroughGridOverlay(drawScope, cameraPos, pitch, yaw, roll, width, height, fov)
         }
 
-        // 2. Draw 3D Floating Grey Rounded-Corner Spatial Window (The primary clean VR Box UI)
+        // 2. Draw 3D World-Anchored Grey Rounded-Corner Spatial Window (Fixed in 3D virtual world)
         if (vrBoxWindow.isVisible) {
             drawVRBoxWindow(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, vrBoxWindow)
         }
 
-        // 3. Draw 3D Burst Particles
+        // 3. Draw 3D Hand Tracking with Grey Outline Border & Joints
+        if (rightHand.isTracked) {
+            drawTrackedGreyHand(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, rightHand, isRight = true)
+        }
+        if (leftHand.isTracked) {
+            drawTrackedGreyHand(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, leftHand, isRight = false)
+        }
+
+        // 4. Draw 3D Burst Particles
         drawParticles(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, particles)
 
-        // 4. Draw Center Reticle / Crosshair for Head Gaze Aiming (with dwell ring)
+        // 5. Draw Center Reticle / Crosshair for Head Gaze Aiming (with dwell ring)
         val forwardDir = VRMath.getForwardVector(pitch, yaw, roll)
         val centerProj = VRMath.project3DTo2D(
             pointWorld = cameraPos + forwardDir * 2.0f,
@@ -109,8 +118,8 @@ object VRRenderer {
 
 
     /**
-     * Renders the rock-solid, non-warping Grey Rounded-Corner Spatial Window (Head-locked / Screen-locked)
-     * This ensures the window never bends, shears, or distorts when the phone is shaken or moved.
+     * Renders the 3D World-Anchored Grey Rounded-Corner Spatial Window.
+     * Fixed in virtual space: stays in place when head turns, scaled accurately by distance depth.
      */
     private fun drawVRBoxWindow(
         drawScope: DrawScope,
@@ -123,166 +132,347 @@ object VRRenderer {
         fov: Float,
         win: VRBoxWindowState
     ) {
-        val cardW = (width * 0.84f).coerceIn(290f, 540f)
-        val cardH = (height * 0.76f).coerceIn(210f, 370f)
-        val centerX = width * 0.5f
-        val centerY = height * 0.5f
+        val anchor = win.anchorPos
+        val centerProj = VRMath.project3DTo2D(anchor, cameraPos, pitch, yaw, roll, width, height, fov)
+        if (!centerProj.isVisible || centerProj.depth <= 0.2f) return
+
+        // Scale according to 3D distance depth
+        val depthScale = (2.0f / centerProj.depth).coerceIn(0.25f, 2.5f)
+        val cardW = (width * 0.52f * depthScale).coerceIn(160f, 900f)
+        val cardH = (cardW * 0.62f).coerceIn(100f, 580f)
+
+        val centerX = centerProj.screenX
+        val centerY = centerProj.screenY
 
         val cardLeft = centerX - cardW * 0.5f
         val cardTop = centerY - cardH * 0.5f
         val cardRight = cardLeft + cardW
         val cardBottom = cardTop + cardH
-        val cornerRad = 20f
+        val cornerRad = (18f * depthScale).coerceIn(8f, 32f)
 
-        // 1. Solid Slate Grey Rounded-Corner Floating Window Background (Zero Warping)
-        drawScope.drawRoundRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xF6282E39), // Slate Charcoal
-                    Color(0xFA1C2128),
-                    Color(0xFD13161C)
+        // Compute billboard tilt angle from 3D orientation
+        val pRight = VRMath.project3DTo2D(anchor + Vector3(1f, 0f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val rollAngleDeg = if (pRight.isVisible) {
+            Math.toDegrees(atan2((pRight.screenY - centerProj.screenY).toDouble(), (pRight.screenX - centerProj.screenX).toDouble())).toFloat()
+        } else {
+            0f
+        }
+
+        drawScope.rotate(degrees = rollAngleDeg, pivot = Offset(centerX, centerY)) {
+            // 1. Solid Slate Grey Rounded-Corner Floating Window Background (Anchored in 3D Space)
+            drawRoundRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xF6282E39), // Slate Charcoal
+                        Color(0xFA1C2128),
+                        Color(0xFD13161C)
+                    ),
+                    startY = cardTop,
+                    endY = cardBottom
                 ),
-                startY = cardTop,
-                endY = cardBottom
-            ),
-            topLeft = Offset(cardLeft, cardTop),
-            size = Size(cardW, cardH),
-            cornerRadius = CornerRadius(cornerRad, cornerRad)
-        )
+                topLeft = Offset(cardLeft, cardTop),
+                size = Size(cardW, cardH),
+                cornerRadius = CornerRadius(cornerRad, cornerRad)
+            )
 
-        // Outer Clean Silver / Slate Border Stroke
-        drawScope.drawRoundRect(
-            color = Color(0xFF94A3B8), // Sleek silver / light slate border
-            topLeft = Offset(cardLeft, cardTop),
-            size = Size(cardW, cardH),
-            cornerRadius = CornerRadius(cornerRad, cornerRad),
-            style = Stroke(width = 2.0f)
-        )
+            // Outer Clean Silver / Slate Border Stroke
+            drawRoundRect(
+                color = Color(0xFF94A3B8), // Sleek silver / light slate border
+                topLeft = Offset(cardLeft, cardTop),
+                size = Size(cardW, cardH),
+                cornerRadius = CornerRadius(cornerRad, cornerRad),
+                style = Stroke(width = (2.0f * depthScale).coerceIn(1.2f, 3.5f))
+            )
 
-        val nativeCanvas = drawScope.drawContext.canvas.nativeCanvas
+            val nativeCanvas = drawContext.canvas.nativeCanvas
 
-        // 2. Window Header Bar (Title & Live Status)
-        val headerY = cardTop + cardH * 0.10f
-        val titlePaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.WHITE
-            textSize = (cardH * 0.065f).coerceIn(13f, 20f)
-            isAntiAlias = true
-            textAlign = android.graphics.Paint.Align.LEFT
-            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
-        }
-        nativeCanvas.drawText("VR BOX SPATIAL MR", cardLeft + 20f, headerY, titlePaint)
+            // 2. Window Header Bar (Title & Live Status)
+            val headerY = cardTop + cardH * 0.11f
+            val titlePaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.WHITE
+                textSize = (cardH * 0.065f).coerceIn(10f, 22f)
+                isAntiAlias = true
+                textAlign = android.graphics.Paint.Align.LEFT
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+            }
+            nativeCanvas.drawText("VR BOX SPATIAL MR", cardLeft + cardW * 0.04f, headerY, titlePaint)
 
-        val statusPaint = android.graphics.Paint().apply {
-            color = if (win.isPassthroughActive) android.graphics.Color.parseColor("#10B981") else android.graphics.Color.parseColor("#38BDF8")
-            textSize = (cardH * 0.052f).coerceIn(10f, 15f)
-            isAntiAlias = true
-            textAlign = android.graphics.Paint.Align.RIGHT
-            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
-        }
-        val statusText = if (win.isPassthroughActive) "● LIVE CAMERA MR" else "🌌 3D SPACE GRID"
-        nativeCanvas.drawText(statusText, cardRight - 20f, headerY, statusPaint)
+            val statusPaint = android.graphics.Paint().apply {
+                color = if (win.isPassthroughActive) android.graphics.Color.parseColor("#10B981") else android.graphics.Color.parseColor("#38BDF8")
+                textSize = (cardH * 0.052f).coerceIn(8.5f, 16f)
+                isAntiAlias = true
+                textAlign = android.graphics.Paint.Align.RIGHT
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+            }
+            val statusText = if (win.isPassthroughActive) "● LIVE CAMERA MR" else "🌌 3D SPACE GRID"
+            nativeCanvas.drawText(statusText, cardRight - cardW * 0.04f, headerY, statusPaint)
 
-        // Header Divider Line
-        val divY = cardTop + cardH * 0.15f
-        drawScope.drawLine(
-            color = Color(0xFF334155),
-            start = Offset(cardLeft + 16f, divY),
-            end = Offset(cardRight - 16f, divY),
-            strokeWidth = 1.2f
-        )
+            // Header Divider Line
+            val divY = cardTop + cardH * 0.16f
+            drawLine(
+                color = Color(0xFF334155),
+                start = Offset(cardLeft + cardW * 0.035f, divY),
+                end = Offset(cardRight - cardW * 0.035f, divY),
+                strokeWidth = (1.2f * depthScale).coerceIn(0.8f, 2.0f)
+            )
 
-        // 3. Recessed Body Content Panel (Dark inset card with crisp instruction text)
-        val bodyLeft = cardLeft + cardW * 0.035f
-        val bodyTop = cardTop + cardH * 0.19f
-        val bodyW = cardW * 0.93f
-        val bodyH = cardH * 0.48f
+            // 3. Recessed Body Content Panel (Dark inset card with instruction text)
+            val bodyLeft = cardLeft + cardW * 0.035f
+            val bodyTop = cardTop + cardH * 0.20f
+            val bodyW = cardW * 0.93f
+            val bodyH = cardH * 0.46f
 
-        drawScope.drawRoundRect(
-            color = Color(0xF20F1217),
-            topLeft = Offset(bodyLeft, bodyTop),
-            size = Size(bodyW, bodyH),
-            cornerRadius = CornerRadius(14f, 14f)
-        )
-        drawScope.drawRoundRect(
-            color = Color(0xFF334155),
-            topLeft = Offset(bodyLeft, bodyTop),
-            size = Size(bodyW, bodyH),
-            cornerRadius = CornerRadius(14f, 14f),
-            style = Stroke(width = 1.0f)
-        )
+            drawRoundRect(
+                color = Color(0xF20F1217),
+                topLeft = Offset(bodyLeft, bodyTop),
+                size = Size(bodyW, bodyH),
+                cornerRadius = CornerRadius((14f * depthScale).coerceIn(6f, 20f), (14f * depthScale).coerceIn(6f, 20f))
+            )
+            drawRoundRect(
+                color = Color(0xFF334155),
+                topLeft = Offset(bodyLeft, bodyTop),
+                size = Size(bodyW, bodyH),
+                cornerRadius = CornerRadius((14f * depthScale).coerceIn(6f, 20f), (14f * depthScale).coerceIn(6f, 20f)),
+                style = Stroke(width = (1.0f * depthScale).coerceIn(0.8f, 2.0f))
+            )
 
-        val bodyPaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.parseColor("#E2E8F0")
-            textSize = (cardH * 0.050f).coerceIn(10.5f, 15.5f)
-            isAntiAlias = true
-            textAlign = android.graphics.Paint.Align.LEFT
-            typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
-        }
-        val subPaint = android.graphics.Paint().apply {
-            color = android.graphics.Color.parseColor("#94A3B8")
-            textSize = (cardH * 0.044f).coerceIn(9.5f, 13.5f)
-            isAntiAlias = true
-            textAlign = android.graphics.Paint.Align.LEFT
-            typeface = android.graphics.Typeface.SANS_SERIF
-        }
-
-        nativeCanvas.drawText("• 후면 카메라를 통해 실시간 외부 비디오 배경이 투과됩니다.", bodyLeft + 16f, bodyTop + bodyH * 0.28f, bodyPaint)
-        nativeCanvas.drawText("• 스마트폰을 VR BOX 헤드셋에 삽입해도 왜곡 없이 안정된 창으로 고정됩니다.", bodyLeft + 16f, bodyTop + bodyH * 0.56f, subPaint)
-        nativeCanvas.drawText("• 화면 터치 또는 하단 버튼을 조준/클릭하여 원하는 모드로 즉시 변경하세요.", bodyLeft + 16f, bodyTop + bodyH * 0.82f, subPaint)
-
-        // 4. Interactive Bottom Action Buttons
-        val buttons = listOf(
-            Triple("btn_recenter", "🧭 시점정렬", Color(0xFF1E242E)),
-            Triple("btn_passthrough", if (win.isPassthroughActive) "📷 MR: ON" else "📷 MR: OFF", if (win.isPassthroughActive) Color(0xFF065F46) else Color(0xFF1E242E)),
-            Triple("btn_ipd", "👓 ${win.ipdMm.toInt()}mm", Color(0xFF1E242E)),
-            Triple("btn_proceed", "✓ 시작하기", Color(0xFF1E3A5F))
-        )
-
-        val btnTop = cardTop + cardH * 0.72f
-        val btnH = cardH * 0.21f
-        val btnSpacing = cardW * 0.02f
-        val btnW = (cardW * 0.93f - btnSpacing * 3f) / 4f
-        val btnStartX = cardLeft + cardW * 0.035f
-
-        for (i in buttons.indices) {
-            val (id, label, defaultBg) = buttons[i]
-            val isHovered = win.hoveredButtonId == id
-            val isPrimary = (id == "btn_proceed")
-            val bX = btnStartX + i * (btnW + btnSpacing)
-
-            val btnBgColor = if (isHovered) Color(0xFF0284C7) else defaultBg
-            val btnStrokeColor = when {
-                isHovered -> Color.White
-                isPrimary -> Color(0xFF38BDF8)
-                else -> Color(0xFF475569)
+            val bodyPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.parseColor("#E2E8F0")
+                textSize = (cardH * 0.052f).coerceIn(8.5f, 16f)
+                isAntiAlias = true
+                textAlign = android.graphics.Paint.Align.LEFT
+                typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+            }
+            val subPaint = android.graphics.Paint().apply {
+                color = android.graphics.Color.parseColor("#94A3B8")
+                textSize = (cardH * 0.044f).coerceIn(7.5f, 14f)
+                isAntiAlias = true
+                textAlign = android.graphics.Paint.Align.LEFT
+                typeface = android.graphics.Typeface.SANS_SERIF
             }
 
-            drawScope.drawRoundRect(
-                color = btnBgColor,
-                topLeft = Offset(bX, btnTop),
-                size = Size(btnW, btnH),
-                cornerRadius = CornerRadius(12f, 12f)
-            )
-            drawScope.drawRoundRect(
-                color = btnStrokeColor,
-                topLeft = Offset(bX, btnTop),
-                size = Size(btnW, btnH),
-                cornerRadius = CornerRadius(12f, 12f),
-                style = Stroke(width = if (isHovered) 2.0f else 1.0f)
+            nativeCanvas.drawText("• 가상 세계 속에 3D로 고정된 공간 창입니다.", bodyLeft + cardW * 0.03f, bodyTop + bodyH * 0.28f, bodyPaint)
+            nativeCanvas.drawText("• 머리를 돌려 시야를 이동해도 창이 해당 위치에 유지됩니다.", bodyLeft + cardW * 0.03f, bodyTop + bodyH * 0.56f, subPaint)
+            nativeCanvas.drawText("• 손을 카메라에 비추면 회색 테두리 핸드트래킹이 활성화됩니다.", bodyLeft + cardW * 0.03f, bodyTop + bodyH * 0.82f, subPaint)
+
+            // 4. Interactive Bottom Action Buttons
+            val buttons = listOf(
+                Triple("btn_recenter", "🧭 시점정렬", Color(0xFF1E242E)),
+                Triple("btn_passthrough", if (win.isPassthroughActive) "📷 MR: ON" else "📷 MR: OFF", if (win.isPassthroughActive) Color(0xFF065F46) else Color(0xFF1E242E)),
+                Triple("btn_ipd", "👓 ${win.ipdMm.toInt()}mm", Color(0xFF1E242E)),
+                Triple("btn_proceed", "✓ 시작하기", Color(0xFF1E3A5F))
             )
 
-            val btnTextPaint = android.graphics.Paint().apply {
-                color = if (isHovered) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#F8FAFC")
-                textSize = (cardH * 0.048f).coerceIn(9.5f, 14.5f)
-                isAntiAlias = true
-                textAlign = android.graphics.Paint.Align.CENTER
-                typeface = if (isHovered || isPrimary) {
-                    android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
-                } else {
-                    android.graphics.Typeface.SANS_SERIF
+            val btnTop = cardTop + cardH * 0.70f
+            val btnH = cardH * 0.22f
+            val btnSpacing = cardW * 0.02f
+            val btnW = (cardW * 0.93f - btnSpacing * 3f) / 4f
+            val btnStartX = cardLeft + cardW * 0.035f
+
+            for (i in buttons.indices) {
+                val (id, label, defaultBg) = buttons[i]
+                val isHovered = win.hoveredButtonId == id
+                val isPrimary = (id == "btn_proceed")
+                val bX = btnStartX + i * (btnW + btnSpacing)
+
+                val btnBgColor = if (isHovered) Color(0xFF0284C7) else defaultBg
+                val btnStrokeColor = when {
+                    isHovered -> Color.White
+                    isPrimary -> Color(0xFF38BDF8)
+                    else -> Color(0xFF475569)
+                }
+
+                drawRoundRect(
+                    color = btnBgColor,
+                    topLeft = Offset(bX, btnTop),
+                    size = Size(btnW, btnH),
+                    cornerRadius = CornerRadius((12f * depthScale).coerceIn(5f, 18f), (12f * depthScale).coerceIn(5f, 18f))
+                )
+                drawRoundRect(
+                    color = btnStrokeColor,
+                    topLeft = Offset(bX, btnTop),
+                    size = Size(btnW, btnH),
+                    cornerRadius = CornerRadius((12f * depthScale).coerceIn(5f, 18f), (12f * depthScale).coerceIn(5f, 18f)),
+                    style = Stroke(width = if (isHovered) (2.0f * depthScale).coerceIn(1.5f, 3.5f) else (1.0f * depthScale).coerceIn(0.8f, 2.0f))
+                )
+
+                val btnTextPaint = android.graphics.Paint().apply {
+                    color = if (isHovered) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#F8FAFC")
+                    textSize = (cardH * 0.048f).coerceIn(7.5f, 15f)
+                    isAntiAlias = true
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    typeface = if (isHovered || isPrimary) {
+                        android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+                    } else {
+                        android.graphics.Typeface.SANS_SERIF
+                    }
+                }
+                nativeCanvas.drawText(label, bX + btnW * 0.5f, btnTop + btnH * 0.62f, btnTextPaint)
+            }
+        }
+    }
+
+    /**
+     * Renders 3D Tracked Hand with a distinct Grey Border / Outline (손에 회색 테두리)
+     */
+    private fun drawTrackedGreyHand(
+        drawScope: DrawScope,
+        cameraPos: Vector3,
+        pitch: Float,
+        yaw: Float,
+        roll: Float,
+        width: Float,
+        height: Float,
+        fov: Float,
+        hand: TrackedHand,
+        isRight: Boolean
+    ) {
+        if (!hand.isTracked) return
+
+        val pHand = VRMath.project3DTo2D(hand.position, cameraPos, pitch, yaw, roll, width, height, fov)
+        if (!pHand.isVisible || pHand.depth <= 0.1f) return
+
+        val scale = (0.1f / pHand.depth) * width * 0.35f
+        val greyOutline = Color(0xFF94A3B8) // Slate silver grey
+        val greyDark = Color(0xFF475569)
+        val greyLight = Color(0xFFCBD5E1)
+        val fillTranslucent = Color(0x33334155)
+
+        // 1. Hand Contour Silhouette with Grey Border Outline (손에 회색 테두리)
+        if (hand.contourPoints.size >= 4) {
+            val contourPath = Path()
+            var firstPoint = true
+            for (pt in hand.contourPoints) {
+                val proj = VRMath.project3DTo2D(pt, cameraPos, pitch, yaw, roll, width, height, fov)
+                if (proj.isVisible) {
+                    if (firstPoint) {
+                        contourPath.moveTo(proj.screenX, proj.screenY)
+                        firstPoint = false
+                    } else {
+                        contourPath.lineTo(proj.screenX, proj.screenY)
+                    }
                 }
             }
-            nativeCanvas.drawText(label, bX + btnW * 0.5f, btnTop + btnH * 0.62f, btnTextPaint)
+            contourPath.close()
+
+            // Translucent grey hand body mesh fill
+            drawScope.drawPath(
+                path = contourPath,
+                color = fillTranslucent
+            )
+
+            // Outer subtle halo outline
+            drawScope.drawPath(
+                path = contourPath,
+                color = greyDark.copy(alpha = 0.5f),
+                style = Stroke(width = 4.0f)
+            )
+
+            // Sharp Grey Border Contour Stroke (회색 테두리)
+            drawScope.drawPath(
+                path = contourPath,
+                color = greyOutline,
+                style = Stroke(width = 2.5f)
+            )
+        }
+
+        // 2. Skeletal Finger Bones & Joints
+        val pWrist = VRMath.project3DTo2D(hand.wristPosition, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pThumb = VRMath.project3DTo2D(hand.thumbTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pIndex = VRMath.project3DTo2D(hand.indexTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pMiddle = VRMath.project3DTo2D(hand.middleTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pRing = VRMath.project3DTo2D(hand.ringTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pPinky = VRMath.project3DTo2D(hand.pinkyTip, cameraPos, pitch, yaw, roll, width, height, fov)
+
+        val palmCenter = pHand
+        val fingerTips = listOf(pThumb, pIndex, pMiddle, pRing, pPinky)
+
+        for (tip in fingerTips) {
+            if (tip.isVisible && palmCenter.isVisible) {
+                // Bone segment line
+                drawScope.drawLine(
+                    color = greyDark.copy(alpha = 0.7f),
+                    start = Offset(palmCenter.screenX, palmCenter.screenY),
+                    end = Offset(tip.screenX, tip.screenY),
+                    strokeWidth = 1.8f
+                )
+                // Fingertip Node (Crisp white with grey border ring)
+                drawScope.drawCircle(
+                    color = Color.White,
+                    radius = (scale * 0.08f).coerceIn(2.5f, 6.0f),
+                    center = Offset(tip.screenX, tip.screenY)
+                )
+                drawScope.drawCircle(
+                    color = greyOutline,
+                    radius = (scale * 0.14f).coerceIn(4.0f, 9.0f),
+                    center = Offset(tip.screenX, tip.screenY),
+                    style = Stroke(width = 1.5f)
+                )
+            }
+        }
+
+        if (pWrist.isVisible && palmCenter.isVisible) {
+            drawScope.drawLine(
+                color = greyOutline.copy(alpha = 0.8f),
+                start = Offset(pWrist.screenX, pWrist.screenY),
+                end = Offset(palmCenter.screenX, palmCenter.screenY),
+                strokeWidth = 2.5f
+            )
+            drawScope.drawCircle(
+                color = greyLight,
+                radius = (scale * 0.15f).coerceIn(4.0f, 10.0f),
+                center = Offset(pWrist.screenX, pWrist.screenY),
+                style = Stroke(width = 2.0f)
+            )
+        }
+
+        // Palm Center Sensor Node
+        drawScope.drawCircle(
+            color = if (hand.isPinching) Color.White else greyLight,
+            radius = (scale * 0.18f).coerceIn(5.0f, 14.0f),
+            center = Offset(pHand.screenX, pHand.screenY)
+        )
+        drawScope.drawCircle(
+            color = greyOutline,
+            radius = (scale * 0.28f).coerceIn(8.0f, 20.0f),
+            center = Offset(pHand.screenX, pHand.screenY),
+            style = Stroke(width = 1.8f)
+        )
+
+        // 3. Pinching Feedback Ring
+        if (hand.isPinching && pIndex.isVisible && pThumb.isVisible) {
+            val pinchX = (pIndex.screenX + pThumb.screenX) * 0.5f
+            val pinchY = (pIndex.screenY + pThumb.screenY) * 0.5f
+            drawScope.drawCircle(
+                color = Color.White,
+                radius = 7f,
+                center = Offset(pinchX, pinchY)
+            )
+            drawScope.drawCircle(
+                color = Color(0xFF38BDF8),
+                radius = 15f,
+                center = Offset(pinchX, pinchY),
+                style = Stroke(width = 2.5f)
+            )
+        }
+
+        // 4. Index Finger Laser Pointer Beam
+        val ray = hand.laserRay
+        if (ray != null && pIndex.isVisible) {
+            val rayTarget = ray.getPoint(2.0f)
+            val pRayEnd = VRMath.project3DTo2D(rayTarget, cameraPos, pitch, yaw, roll, width, height, fov)
+            if (pRayEnd.isVisible) {
+                drawScope.drawLine(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color.White.copy(alpha = 0.8f), greyOutline.copy(alpha = 0.5f), Color.Transparent),
+                        start = Offset(pIndex.screenX, pIndex.screenY),
+                        end = Offset(pRayEnd.screenX, pRayEnd.screenY)
+                    ),
+                    start = Offset(pIndex.screenX, pIndex.screenY),
+                    end = Offset(pRayEnd.screenX, pRayEnd.screenY),
+                    strokeWidth = if (hand.isPinching) 3.0f else 1.5f
+                )
+            }
         }
     }
 

@@ -41,11 +41,12 @@ class HeadTracker(context: Context) : SensorEventListener {
     private var manualYaw = 0f
     private var manualPitch = 0f
 
-    // Smoothing filter variables
+    // Smoothing filter variables (Low-pass filter with anti-jitter damping)
     private var currentPitch = 0f
     private var currentYaw = 0f
     private var currentRoll = 0f
-    private val smoothingFactor = 0.35f // Lerp factor for smooth motion
+    private val smoothingFactor = 0.18f // Gentle low-pass filter for rock-solid stability
+    private val gyroSensitivity = 0.85f // Calibrated sensitivity to avoid over-sensitive twitching
 
     private val rotationMatrix = FloatArray(9)
     private val remappedMatrix = FloatArray(9)
@@ -86,7 +87,7 @@ class HeadTracker(context: Context) : SensorEventListener {
     /**
      * Handle touch drag look-around for 2D flat mode or emulator
      */
-    fun onDrag(deltaX: Float, deltaY: Float, sensitivity: Float = 0.004f) {
+    fun onDrag(deltaX: Float, deltaY: Float, sensitivity: Float = 0.003f) {
         manualYaw += deltaX * sensitivity
         manualPitch = (manualPitch + deltaY * sensitivity).coerceIn(-1.4f, 1.4f)
         updateOrientationState()
@@ -99,7 +100,6 @@ class HeadTracker(context: Context) : SensorEventListener {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
 
             // In Landscape mode (phone sideways in VR headset), remap coordinate axes:
-            // World X = Device Y, World Y = -Device X
             SensorManager.remapCoordinateSystem(
                 rotationMatrix,
                 SensorManager.AXIS_Y,
@@ -109,9 +109,10 @@ class HeadTracker(context: Context) : SensorEventListener {
 
             SensorManager.getOrientation(remappedMatrix, orientationValues)
 
-            val rawYaw = orientationValues[0]   // Azimuth
-            val rawPitch = orientationValues[1] // Pitch
-            val rawRoll = orientationValues[2]  // Roll
+            // Invert rawYaw sign so turning head right turns view right (fixes inverted left-right)
+            val rawYaw = -orientationValues[0]
+            val rawPitch = orientationValues[1]
+            val rawRoll = orientationValues[2]
 
             if (isFirstReading) {
                 currentYaw = rawYaw
@@ -122,15 +123,19 @@ class HeadTracker(context: Context) : SensorEventListener {
                 rollOffset = rawRoll
                 isFirstReading = false
             } else {
-                // Apply exponential smoothing (low-pass filter)
-                currentYaw = currentYaw + smoothingFactor * (rawYaw - currentYaw)
-                currentPitch = currentPitch + smoothingFactor * (rawPitch - currentPitch)
-                currentRoll = currentRoll + smoothingFactor * (rawRoll - currentRoll)
+                // Shortest angular difference for yaw to prevent 360-degree snap jumps
+                var diffYaw = rawYaw - currentYaw
+                while (diffYaw < -Math.PI) diffYaw += (2 * Math.PI).toFloat()
+                while (diffYaw > Math.PI) diffYaw -= (2 * Math.PI).toFloat()
+
+                currentYaw += diffYaw * smoothingFactor
+                currentPitch += (rawPitch - currentPitch) * smoothingFactor
+                currentRoll += (rawRoll - currentRoll) * smoothingFactor
             }
 
             updateOrientationState()
         } else if (event.sensor.type == Sensor.TYPE_ORIENTATION) {
-            val rawYaw = Math.toRadians(event.values[0].toDouble()).toFloat()
+            val rawYaw = -Math.toRadians(event.values[0].toDouble()).toFloat()
             val rawPitch = Math.toRadians(event.values[1].toDouble()).toFloat()
             val rawRoll = Math.toRadians(event.values[2].toDouble()).toFloat()
 
@@ -143,9 +148,13 @@ class HeadTracker(context: Context) : SensorEventListener {
                 rollOffset = rawRoll
                 isFirstReading = false
             } else {
-                currentYaw = currentYaw + smoothingFactor * (rawYaw - currentYaw)
-                currentPitch = currentPitch + smoothingFactor * (rawPitch - currentPitch)
-                currentRoll = currentRoll + smoothingFactor * (rawRoll - currentRoll)
+                var diffYaw = rawYaw - currentYaw
+                while (diffYaw < -Math.PI) diffYaw += (2 * Math.PI).toFloat()
+                while (diffYaw > Math.PI) diffYaw -= (2 * Math.PI).toFloat()
+
+                currentYaw += diffYaw * smoothingFactor
+                currentPitch += (rawPitch - currentPitch) * smoothingFactor
+                currentRoll += (rawRoll - currentRoll) * smoothingFactor
             }
 
             updateOrientationState()
@@ -153,9 +162,9 @@ class HeadTracker(context: Context) : SensorEventListener {
     }
 
     private fun updateOrientationState() {
-        val finalYaw = currentYaw - yawOffset + manualYaw
-        val finalPitch = (currentPitch - pitchOffset + manualPitch).coerceIn(-1.5f, 1.5f)
-        val finalRoll = currentRoll - rollOffset
+        val finalYaw = (currentYaw - yawOffset) * gyroSensitivity + manualYaw
+        val finalPitch = ((currentPitch - pitchOffset) * gyroSensitivity + manualPitch).coerceIn(-1.5f, 1.5f)
+        val finalRoll = (currentRoll - rollOffset) * gyroSensitivity
 
         _orientation.value = HeadOrientation(
             pitch = finalPitch,

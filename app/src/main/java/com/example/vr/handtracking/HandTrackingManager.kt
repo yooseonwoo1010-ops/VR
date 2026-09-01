@@ -19,27 +19,60 @@ import java.util.concurrent.Executors
 class HandTrackingManager(private val context: Context) {
 
     private val _rightHand = MutableStateFlow(
-        TrackedHand(
-            isTracked = true,
-            isLeft = false,
-            position = Vector3(0.35f, -0.25f, 1.2f),
-            laserRay = Ray3D(Vector3(0.35f, -0.25f, 1.2f), Vector3(0f, 0f, 1f)),
-            gesture = HandGesture.OPEN_PALM
-        )
+        createDefaultHand(isRight = true)
     )
     val rightHand: StateFlow<TrackedHand> = _rightHand.asStateFlow()
 
     private val _leftHand = MutableStateFlow(
-        TrackedHand(
-            isTracked = true,
-            isLeft = true,
-            position = Vector3(-0.35f, -0.25f, 1.2f),
-            laserRay = Ray3D(Vector3(-0.35f, -0.25f, 1.2f), Vector3(0f, 0f, 1f)),
-            gesture = HandGesture.OPEN_PALM,
-            color = 0xFFFF0077
-        )
+        createDefaultHand(isRight = false)
     )
     val leftHand: StateFlow<TrackedHand> = _leftHand.asStateFlow()
+
+    companion object {
+        fun createDefaultHand(isRight: Boolean): TrackedHand {
+            val posX = if (isRight) 0.35f else -0.35f
+            val posY = -0.22f
+            val posZ = 1.2f
+
+            val wristPos = Vector3(posX, posY - 0.16f, posZ + 0.06f)
+            val thumbTipPos = Vector3(posX + (if (isRight) -0.06f else 0.06f), posY + 0.05f, posZ - 0.03f)
+            val indexTipPos = Vector3(posX, posY + 0.12f, posZ - 0.06f)
+            val middleTipPos = Vector3(posX + (if (isRight) 0.03f else -0.03f), posY + 0.14f, posZ - 0.07f)
+            val ringTipPos = Vector3(posX + (if (isRight) 0.06f else -0.06f), posY + 0.11f, posZ - 0.05f)
+            val pinkyTipPos = Vector3(posX + (if (isRight) 0.085f else -0.085f), posY + 0.06f, posZ - 0.03f)
+
+            val contour = listOf(
+                wristPos,
+                Vector3(posX + (if (isRight) -0.07f else 0.07f), posY - 0.04f, posZ),
+                thumbTipPos,
+                Vector3(posX + (if (isRight) -0.02f else 0.02f), posY + 0.06f, posZ),
+                indexTipPos,
+                Vector3(posX + (if (isRight) 0.015f else -0.015f), posY + 0.09f, posZ),
+                middleTipPos,
+                Vector3(posX + (if (isRight) 0.045f else -0.045f), posY + 0.08f, posZ),
+                ringTipPos,
+                Vector3(posX + (if (isRight) 0.075f else -0.075f), posY + 0.05f, posZ),
+                pinkyTipPos,
+                Vector3(posX + (if (isRight) 0.075f else -0.075f), posY - 0.07f, posZ),
+                wristPos
+            )
+
+            return TrackedHand(
+                isTracked = true,
+                isLeft = !isRight,
+                position = Vector3(posX, posY, posZ),
+                wristPosition = wristPos,
+                indexTip = indexTipPos,
+                thumbTip = thumbTipPos,
+                middleTip = middleTipPos,
+                ringTip = ringTipPos,
+                pinkyTip = pinkyTipPos,
+                contourPoints = contour,
+                laserRay = Ray3D(Vector3(posX, posY, posZ), Vector3(posX * 0.4f, posY * 0.4f, 1f).normalized()),
+                gesture = HandGesture.OPEN_PALM
+            )
+        }
+    }
 
     private val _trackingSource = MutableStateFlow(HandTrackingSource.CAMERA_AI)
     val trackingSource: StateFlow<HandTrackingSource> = _trackingSource.asStateFlow()

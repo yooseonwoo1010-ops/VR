@@ -335,10 +335,7 @@ class VREnvironmentEngine(private val context: Context) {
     }
 
     /**
-     * Updates Gaze Raycasting & Interactive selection on the 3D Floating Grey Window
-     */
-    /**
-     * Updates Gaze Reticle & Interactive selection on the Fixed Grey Window
+     * Updates Gaze Raycasting & Interactive selection on the 3D World-Anchored Spatial Window
      */
     private fun updateVRBoxWindow(
         dt: Float,
@@ -347,19 +344,41 @@ class VREnvironmentEngine(private val context: Context) {
         val currentWin = _vrBoxWindow.value
         if (!currentWin.isVisible) return
 
-        // Gaze is naturally centered in head-locked view
-        // Buttons are in lower section
-        var newHoveredId: String? = null
-        val pitch = headOrientation.pitch
-        val yaw = headOrientation.yaw
+        val forwardDir = VRMath.getForwardVector(headOrientation.pitch, headOrientation.yaw, headOrientation.roll)
+        val gazeRay = Ray3D(origin = Vector3(0f, 0f, 0f), direction = forwardDir)
 
-        // When looking down slightly (pitch ~ -10 deg to -28 deg):
-        if (pitch in -0.50f..-0.10f) {
-            when {
-                yaw < -0.20f -> newHoveredId = "btn_recenter"
-                yaw in -0.20f..0.00f -> newHoveredId = "btn_passthrough"
-                yaw in 0.00f..0.20f -> newHoveredId = "btn_ipd"
-                yaw > 0.20f -> newHoveredId = "btn_proceed"
+        val windowPos = currentWin.anchorPos
+        val quadNormal = (Vector3(0f, 0f, 0f) - windowPos).normalized()
+        val hitT = VRMath.rayIntersectsQuad(
+            ray = gazeRay,
+            quadCenter = windowPos,
+            quadNormal = quadNormal,
+            width = currentWin.width,
+            height = currentWin.height
+        )
+
+        var newHoveredId: String? = null
+        if (hitT != null) {
+            val hitPoint = gazeRay.getPoint(hitT)
+            // Compute quad local coordinates
+            val rightVec = Vector3(-windowPos.z, 0f, windowPos.x).normalized()
+            val upVec = quadNormal.cross(rightVec).normalized()
+
+            val rel = hitPoint - windowPos
+            val localX = rel.dot(rightVec)
+            val localY = rel.dot(upVec)
+
+            val halfW = currentWin.width * 0.5f
+            val halfH = currentWin.height * 0.5f
+
+            // Buttons located in lower section of the 3D window
+            if (localY in (-halfH * 0.95f)..(-halfH * 0.35f)) {
+                when {
+                    localX in (-halfW * 0.92f)..(-halfW * 0.46f) -> newHoveredId = "btn_recenter"
+                    localX in (-halfW * 0.46f)..0.0f -> newHoveredId = "btn_passthrough"
+                    localX in 0.0f..(halfW * 0.46f) -> newHoveredId = "btn_ipd"
+                    localX in (halfW * 0.46f)..(halfW * 0.92f) -> newHoveredId = "btn_proceed"
+                }
             }
         }
 
