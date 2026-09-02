@@ -118,8 +118,8 @@ object VRRenderer {
 
 
     /**
-     * Renders the 3D World-Anchored Grey Rounded-Corner Spatial Window.
-     * Fixed in virtual space: stays in place when head turns, scaled accurately by distance depth.
+     * Renders the 3D World-Anchored Grey Spatial Window (True 3D Perspective Geometry).
+     * Fixed in virtual space without any warping, bending, or skewing (Meta Quest 2 style).
      */
     private fun drawVRBoxWindow(
         drawScope: DrawScope,
@@ -133,147 +133,176 @@ object VRRenderer {
         win: VRBoxWindowState
     ) {
         val anchor = win.anchorPos
-        val centerProj = VRMath.project3DTo2D(anchor, cameraPos, pitch, yaw, roll, width, height, fov)
-        if (!centerProj.isVisible || centerProj.depth <= 0.2f) return
+        val winW = 1.35f
+        val winH = 0.82f
+        val rightVec = Vector3(1f, 0f, 0f)
+        val upVec = Vector3(0f, 1f, 0f)
 
-        // Scale according to 3D distance depth
-        val depthScale = (2.0f / centerProj.depth).coerceIn(0.25f, 2.5f)
-        val cardW = (width * 0.52f * depthScale).coerceIn(160f, 900f)
-        val cardH = (cardW * 0.62f).coerceIn(100f, 580f)
+        // Project 4 Corners of 3D Panel in World Space
+        val cTL = anchor + rightVec * (-winW * 0.5f) + upVec * (winH * 0.5f)
+        val cTR = anchor + rightVec * (winW * 0.5f) + upVec * (winH * 0.5f)
+        val cBR = anchor + rightVec * (winW * 0.5f) + upVec * (-winH * 0.5f)
+        val cBL = anchor + rightVec * (-winW * 0.5f) + upVec * (-winH * 0.5f)
 
-        val centerX = centerProj.screenX
-        val centerY = centerProj.screenY
+        val pTL = VRMath.project3DTo2D(cTL, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pTR = VRMath.project3DTo2D(cTR, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pBR = VRMath.project3DTo2D(cBR, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pBL = VRMath.project3DTo2D(cBL, cameraPos, pitch, yaw, roll, width, height, fov)
 
-        val cardLeft = centerX - cardW * 0.5f
-        val cardTop = centerY - cardH * 0.5f
-        val cardRight = cardLeft + cardW
-        val cardBottom = cardTop + cardH
-        val cornerRad = (18f * depthScale).coerceIn(8f, 32f)
+        if (!pTL.isVisible || !pTR.isVisible || !pBR.isVisible || !pBL.isVisible) return
 
-        // Compute billboard tilt angle from 3D orientation
-        val pRight = VRMath.project3DTo2D(anchor + Vector3(1f, 0f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val rollAngleDeg = if (pRight.isVisible) {
-            Math.toDegrees(atan2((pRight.screenY - centerProj.screenY).toDouble(), (pRight.screenX - centerProj.screenX).toDouble())).toFloat()
-        } else {
-            0f
+        val panelPath = Path().apply {
+            moveTo(pTL.screenX, pTL.screenY)
+            lineTo(pTR.screenX, pTR.screenY)
+            lineTo(pBR.screenX, pBR.screenY)
+            lineTo(pBL.screenX, pBL.screenY)
+            close()
         }
 
-        drawScope.rotate(degrees = rollAngleDeg, pivot = Offset(centerX, centerY)) {
-            // 1. Solid Slate Grey Rounded-Corner Floating Window Background (Anchored in 3D Space)
-            drawRoundRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xF6282E39), // Slate Charcoal
-                        Color(0xFA1C2128),
-                        Color(0xFD13161C)
-                    ),
-                    startY = cardTop,
-                    endY = cardBottom
+        // 1. Solid Slate Grey 3D Window Body (Meta Quest Style)
+        drawScope.drawPath(
+            path = panelPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xF6232934),
+                    Color(0xFA171C23),
+                    Color(0xFE0E1116)
                 ),
-                topLeft = Offset(cardLeft, cardTop),
-                size = Size(cardW, cardH),
-                cornerRadius = CornerRadius(cornerRad, cornerRad)
+                startY = min(pTL.screenY, pTR.screenY),
+                endY = max(pBL.screenY, pBR.screenY)
             )
+        )
 
-            // Outer Clean Silver / Slate Border Stroke
-            drawRoundRect(
-                color = Color(0xFF94A3B8), // Sleek silver / light slate border
-                topLeft = Offset(cardLeft, cardTop),
-                size = Size(cardW, cardH),
-                cornerRadius = CornerRadius(cornerRad, cornerRad),
-                style = Stroke(width = (2.0f * depthScale).coerceIn(1.2f, 3.5f))
-            )
+        // Outer Clean Silver / Slate Border Stroke
+        drawScope.drawPath(
+            path = panelPath,
+            color = Color(0xFF94A3B8),
+            style = Stroke(width = 2.2f)
+        )
 
-            val nativeCanvas = drawContext.canvas.nativeCanvas
+        // Helper to interpolate 3D point on the window surface
+        fun get3DPoint(u: Float, v: Float): Vector3 {
+            return anchor + rightVec * ((u - 0.5f) * winW) + upVec * ((0.5f - v) * winH)
+        }
 
-            // 2. Window Header Bar (Title & Live Status)
-            val headerY = cardTop + cardH * 0.11f
+        val nativeCanvas = drawScope.drawContext.canvas.nativeCanvas
+        val avgDepth = (pTL.depth + pTR.depth + pBR.depth + pBL.depth) * 0.25f
+        val textScale = (1.5f / avgDepth) * width * 0.18f
+
+        // 2. Window Header (Title & Status)
+        val pTitle = VRMath.project3DTo2D(get3DPoint(0.06f, 0.10f), cameraPos, pitch, yaw, roll, width, height, fov)
+        if (pTitle.isVisible) {
             val titlePaint = android.graphics.Paint().apply {
                 color = android.graphics.Color.WHITE
-                textSize = (cardH * 0.065f).coerceIn(10f, 22f)
+                textSize = (textScale * 0.11f).coerceIn(11f, 22f)
                 isAntiAlias = true
                 textAlign = android.graphics.Paint.Align.LEFT
                 typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             }
-            nativeCanvas.drawText("VR BOX SPATIAL MR", cardLeft + cardW * 0.04f, headerY, titlePaint)
+            nativeCanvas.drawText("VR SPATIAL WINDOW", pTitle.screenX, pTitle.screenY, titlePaint)
+        }
 
+        val pStatus = VRMath.project3DTo2D(get3DPoint(0.94f, 0.10f), cameraPos, pitch, yaw, roll, width, height, fov)
+        if (pStatus.isVisible) {
             val statusPaint = android.graphics.Paint().apply {
                 color = if (win.isPassthroughActive) android.graphics.Color.parseColor("#10B981") else android.graphics.Color.parseColor("#38BDF8")
-                textSize = (cardH * 0.052f).coerceIn(8.5f, 16f)
+                textSize = (textScale * 0.088f).coerceIn(9f, 17f)
                 isAntiAlias = true
                 textAlign = android.graphics.Paint.Align.RIGHT
                 typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             }
-            val statusText = if (win.isPassthroughActive) "● LIVE CAMERA MR" else "🌌 3D SPACE GRID"
-            nativeCanvas.drawText(statusText, cardRight - cardW * 0.04f, headerY, statusPaint)
+            val statusText = if (win.isPassthroughActive) "● LIVE CAMERA MR" else "🌌 3D SPACE ANCHOR"
+            nativeCanvas.drawText(statusText, pStatus.screenX, pStatus.screenY, statusPaint)
+        }
 
-            // Header Divider Line
-            val divY = cardTop + cardH * 0.16f
-            drawLine(
+        // Header Divider Line
+        val pDivL = VRMath.project3DTo2D(get3DPoint(0.04f, 0.16f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val pDivR = VRMath.project3DTo2D(get3DPoint(0.96f, 0.16f), cameraPos, pitch, yaw, roll, width, height, fov)
+        if (pDivL.isVisible && pDivR.isVisible) {
+            drawScope.drawLine(
                 color = Color(0xFF334155),
-                start = Offset(cardLeft + cardW * 0.035f, divY),
-                end = Offset(cardRight - cardW * 0.035f, divY),
-                strokeWidth = (1.2f * depthScale).coerceIn(0.8f, 2.0f)
+                start = Offset(pDivL.screenX, pDivL.screenY),
+                end = Offset(pDivR.screenX, pDivR.screenY),
+                strokeWidth = 1.2f
             )
+        }
 
-            // 3. Recessed Body Content Panel (Dark inset card with instruction text)
-            val bodyLeft = cardLeft + cardW * 0.035f
-            val bodyTop = cardTop + cardH * 0.20f
-            val bodyW = cardW * 0.93f
-            val bodyH = cardH * 0.46f
+        // 3. Recessed Body Content Panel
+        val bTL = VRMath.project3DTo2D(get3DPoint(0.04f, 0.20f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val bTR = VRMath.project3DTo2D(get3DPoint(0.96f, 0.20f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val bBR = VRMath.project3DTo2D(get3DPoint(0.96f, 0.66f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val bBL = VRMath.project3DTo2D(get3DPoint(0.04f, 0.66f), cameraPos, pitch, yaw, roll, width, height, fov)
 
-            drawRoundRect(
-                color = Color(0xF20F1217),
-                topLeft = Offset(bodyLeft, bodyTop),
-                size = Size(bodyW, bodyH),
-                cornerRadius = CornerRadius((14f * depthScale).coerceIn(6f, 20f), (14f * depthScale).coerceIn(6f, 20f))
-            )
-            drawRoundRect(
-                color = Color(0xFF334155),
-                topLeft = Offset(bodyLeft, bodyTop),
-                size = Size(bodyW, bodyH),
-                cornerRadius = CornerRadius((14f * depthScale).coerceIn(6f, 20f), (14f * depthScale).coerceIn(6f, 20f)),
-                style = Stroke(width = (1.0f * depthScale).coerceIn(0.8f, 2.0f))
-            )
+        if (bTL.isVisible && bTR.isVisible && bBR.isVisible && bBL.isVisible) {
+            val bodyPath = Path().apply {
+                moveTo(bTL.screenX, bTL.screenY)
+                lineTo(bTR.screenX, bTR.screenY)
+                lineTo(bBR.screenX, bBR.screenY)
+                lineTo(bBL.screenX, bBL.screenY)
+                close()
+            }
+            drawScope.drawPath(bodyPath, color = Color(0xF20F1217))
+            drawScope.drawPath(bodyPath, color = Color(0xFF334155), style = Stroke(width = 1.0f))
 
             val bodyPaint = android.graphics.Paint().apply {
                 color = android.graphics.Color.parseColor("#E2E8F0")
-                textSize = (cardH * 0.052f).coerceIn(8.5f, 16f)
+                textSize = (textScale * 0.082f).coerceIn(8.5f, 16f)
                 isAntiAlias = true
                 textAlign = android.graphics.Paint.Align.LEFT
                 typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             }
             val subPaint = android.graphics.Paint().apply {
                 color = android.graphics.Color.parseColor("#94A3B8")
-                textSize = (cardH * 0.044f).coerceIn(7.5f, 14f)
+                textSize = (textScale * 0.072f).coerceIn(7.5f, 14f)
                 isAntiAlias = true
                 textAlign = android.graphics.Paint.Align.LEFT
                 typeface = android.graphics.Typeface.SANS_SERIF
             }
 
-            nativeCanvas.drawText("• 가상 세계 속에 3D로 고정된 공간 창입니다.", bodyLeft + cardW * 0.03f, bodyTop + bodyH * 0.28f, bodyPaint)
-            nativeCanvas.drawText("• 머리를 돌려 시야를 이동해도 창이 해당 위치에 유지됩니다.", bodyLeft + cardW * 0.03f, bodyTop + bodyH * 0.56f, subPaint)
-            nativeCanvas.drawText("• 손을 카메라에 비추면 회색 테두리 핸드트래킹이 활성화됩니다.", bodyLeft + cardW * 0.03f, bodyTop + bodyH * 0.82f, subPaint)
+            val pLine1 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.32f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pLine2 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.44f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pLine3 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.56f), cameraPos, pitch, yaw, roll, width, height, fov)
 
-            // 4. Interactive Bottom Action Buttons
-            val buttons = listOf(
-                Triple("btn_recenter", "🧭 시점정렬", Color(0xFF1E242E)),
-                Triple("btn_passthrough", if (win.isPassthroughActive) "📷 MR: ON" else "📷 MR: OFF", if (win.isPassthroughActive) Color(0xFF065F46) else Color(0xFF1E242E)),
-                Triple("btn_ipd", "👓 ${win.ipdMm.toInt()}mm", Color(0xFF1E242E)),
-                Triple("btn_proceed", "✓ 시작하기", Color(0xFF1E3A5F))
-            )
+            if (pLine1.isVisible) nativeCanvas.drawText("• 가상 세계 3D 공간에 왜곡 없이 고정된 창입니다.", pLine1.screenX, pLine1.screenY, bodyPaint)
+            if (pLine2.isVisible) nativeCanvas.drawText("• 고개를 돌려 시야를 이동해도 위치가 완벽히 유지됩니다.", pLine2.screenX, pLine2.screenY, subPaint)
+            if (pLine3.isVisible) nativeCanvas.drawText("• 손을 비추면 회색 테두리 실시간 핸드트래킹이 동작합니다.", pLine3.screenX, pLine3.screenY, subPaint)
+        }
 
-            val btnTop = cardTop + cardH * 0.70f
-            val btnH = cardH * 0.22f
-            val btnSpacing = cardW * 0.02f
-            val btnW = (cardW * 0.93f - btnSpacing * 3f) / 4f
-            val btnStartX = cardLeft + cardW * 0.035f
+        // 4. Interactive Bottom Action Buttons in 3D World Space
+        val buttons = listOf(
+            Triple("btn_recenter", "🧭 시점정렬", Color(0xFF1E242E)),
+            Triple("btn_passthrough", if (win.isPassthroughActive) "📷 MR: ON" else "📷 MR: OFF", if (win.isPassthroughActive) Color(0xFF065F46) else Color(0xFF1E242E)),
+            Triple("btn_ipd", "👓 ${win.ipdMm.toInt()}mm", Color(0xFF1E242E)),
+            Triple("btn_proceed", "✓ 시작하기", Color(0xFF1E3A5F))
+        )
 
-            for (i in buttons.indices) {
-                val (id, label, defaultBg) = buttons[i]
-                val isHovered = win.hoveredButtonId == id
-                val isPrimary = (id == "btn_proceed")
-                val bX = btnStartX + i * (btnW + btnSpacing)
+        val btnW = 0.21f
+        val btnSpacing = 0.02f
+        val btnUStart = 0.05f
+
+        for (i in buttons.indices) {
+            val (id, label, defaultBg) = buttons[i]
+            val isHovered = win.hoveredButtonId == id
+            val isPrimary = (id == "btn_proceed")
+
+            val u1 = btnUStart + i * (btnW + btnSpacing)
+            val u2 = u1 + btnW
+            val v1 = 0.72f
+            val v2 = 0.92f
+
+            val btTL = VRMath.project3DTo2D(get3DPoint(u1, v1), cameraPos, pitch, yaw, roll, width, height, fov)
+            val btTR = VRMath.project3DTo2D(get3DPoint(u2, v1), cameraPos, pitch, yaw, roll, width, height, fov)
+            val btBR = VRMath.project3DTo2D(get3DPoint(u2, v2), cameraPos, pitch, yaw, roll, width, height, fov)
+            val btBL = VRMath.project3DTo2D(get3DPoint(u1, v2), cameraPos, pitch, yaw, roll, width, height, fov)
+
+            if (btTL.isVisible && btTR.isVisible && btBR.isVisible && btBL.isVisible) {
+                val btnPath = Path().apply {
+                    moveTo(btTL.screenX, btTL.screenY)
+                    lineTo(btTR.screenX, btTR.screenY)
+                    lineTo(btBR.screenX, btBR.screenY)
+                    lineTo(btBL.screenX, btBL.screenY)
+                    close()
+                }
 
                 val btnBgColor = if (isHovered) Color(0xFF0284C7) else defaultBg
                 val btnStrokeColor = when {
@@ -282,32 +311,24 @@ object VRRenderer {
                     else -> Color(0xFF475569)
                 }
 
-                drawRoundRect(
-                    color = btnBgColor,
-                    topLeft = Offset(bX, btnTop),
-                    size = Size(btnW, btnH),
-                    cornerRadius = CornerRadius((12f * depthScale).coerceIn(5f, 18f), (12f * depthScale).coerceIn(5f, 18f))
-                )
-                drawRoundRect(
-                    color = btnStrokeColor,
-                    topLeft = Offset(bX, btnTop),
-                    size = Size(btnW, btnH),
-                    cornerRadius = CornerRadius((12f * depthScale).coerceIn(5f, 18f), (12f * depthScale).coerceIn(5f, 18f)),
-                    style = Stroke(width = if (isHovered) (2.0f * depthScale).coerceIn(1.5f, 3.5f) else (1.0f * depthScale).coerceIn(0.8f, 2.0f))
-                )
+                drawScope.drawPath(btnPath, color = btnBgColor)
+                drawScope.drawPath(btnPath, color = btnStrokeColor, style = Stroke(width = if (isHovered) 2.2f else 1.0f))
 
-                val btnTextPaint = android.graphics.Paint().apply {
-                    color = if (isHovered) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#F8FAFC")
-                    textSize = (cardH * 0.048f).coerceIn(7.5f, 15f)
-                    isAntiAlias = true
-                    textAlign = android.graphics.Paint.Align.CENTER
-                    typeface = if (isHovered || isPrimary) {
-                        android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
-                    } else {
-                        android.graphics.Typeface.SANS_SERIF
+                val pBtnCenter = VRMath.project3DTo2D(get3DPoint((u1 + u2) * 0.5f, (v1 + v2) * 0.5f + 0.04f), cameraPos, pitch, yaw, roll, width, height, fov)
+                if (pBtnCenter.isVisible) {
+                    val btnTextPaint = android.graphics.Paint().apply {
+                        color = if (isHovered) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#F8FAFC")
+                        textSize = (textScale * 0.082f).coerceIn(8f, 16f)
+                        isAntiAlias = true
+                        textAlign = android.graphics.Paint.Align.CENTER
+                        typeface = if (isHovered || isPrimary) {
+                            android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
+                        } else {
+                            android.graphics.Typeface.SANS_SERIF
+                        }
                     }
+                    nativeCanvas.drawText(label, pBtnCenter.screenX, pBtnCenter.screenY, btnTextPaint)
                 }
-                nativeCanvas.drawText(label, bX + btnW * 0.5f, btnTop + btnH * 0.62f, btnTextPaint)
             }
         }
     }

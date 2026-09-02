@@ -14,16 +14,13 @@ class HandTrackerAnalyzer(
 ) : ImageAnalysis.Analyzer {
 
     private var frameCount = 0
-    private var lastTrackedHand = TrackedHand()
+    private var lastTrackedHand = HandTrackingManager.createDefaultHand(isRight = true)
+    private var isCurrentlyTracked = true
+    private var lostFramesCount = 0
 
     override fun analyze(image: ImageProxy) {
         frameCount++
-        // Downsample analysis: process every 2nd frame for 30+ FPS smooth rendering
-        if (frameCount % 2 != 0) {
-            image.close()
-            return
-        }
-
+        // Process every frame for high responsiveness
         try {
             val yPlane = image.planes[0]
             val uPlane = image.planes[1]
@@ -33,39 +30,28 @@ class HandTrackerAnalyzer(
             val uBuffer: ByteBuffer = uPlane.buffer
             val vBuffer: ByteBuffer = vPlane.buffer
 
-            val width = image.width
-            val height = image.height
+            val imgWidth = image.width
+            val imgHeight = image.height
+            val rotationDegrees = image.imageInfo.rotationDegrees
+
             val yRowStride = yPlane.rowStride
             val uvRowStride = uPlane.rowStride
             val uvPixelStride = uPlane.pixelStride
 
-            // Sample grid (step of 8 for fast real-time computer vision)
-            val step = 8
+            // Fast subsampling step
+            val step = 6
             var sumX = 0L
             var sumY = 0L
             var skinPixelCount = 0
 
-            var minX = width
+            var minX = imgWidth
             var maxX = 0
-            var minY = height
+            var minY = imgHeight
             var maxY = 0
 
-            var topPointX = 0
-            var topPointY = height
-            var rightPointX = 0
-            var rightPointY = 0
-            var leftPointX = width
-            var leftPointY = 0
-            var bottomPointX = 0
-            var bottomPointY = 0
-
-            // Collect edge boundary sample points for real hand silhouette outline contour
-            val edgePoints = mutableListOf<Pair<Int, Int>>()
-
-            for (y in 0 until height step step) {
-                var rowFirstX = -1
-                var rowLastX = -1
-                for (x in 0 until width step step) {
+            // Multi-tier skin/contrast detection across lighting conditions
+            for (y in 0 until imgHeight step step) {
+                for (x in 0 until imgWidth step step) {
                     val yIndex = y * yRowStride + x
                     val uvIndex = (y / 2) * uvRowStride + (x / 2) * uvPixelStride
 
@@ -74,8 +60,11 @@ class HandTrackerAnalyzer(
                         val uVal = uBuffer.get(uvIndex).toInt() and 0xFF
                         val vVal = vBuffer.get(uvIndex).toInt() and 0xFF
 
-                        // Adaptive YCbCr skin tone detection: supports wide lighting & hand skin tones
-                        if (yVal in 35..250 && uVal in 70..135 && vVal in 128..180) {
+                        // Robust YCbCr Skin Tone segmentation (inclusive of diverse tones & room lighting)
+                        val isSkin = (yVal in 30..250 && uVal in 75..135 && vVal in 125..185) ||
+                                (yVal in 45..230 && abs(uVal - 105) < 30 && abs(vVal - 150) < 35)
+
+                        if (isSkin) {
                             sumX += x
                             sumY += y
                             skinPixelCount++
@@ -84,128 +73,123 @@ class HandTrackerAnalyzer(
                             if (x > maxX) maxX = x
                             if (y < minY) minY = y
                             if (y > maxY) maxY = y
-
-                            if (y < topPointY) {
-                                topPointY = y
-                                topPointX = x
-                            }
-                            if (y > bottomPointY) {
-                                bottomPointY = y
-                                bottomPointX = x
-                            }
-                            if (x > rightPointX) {
-                                rightPointX = x
-                                rightPointY = y
-                            }
-                            if (x < leftPointX) {
-                                leftPointX = x
-                                leftPointY = y
-                            }
-
-                            if (rowFirstX == -1) rowFirstX = x
-                            rowLastX = x
                         }
-                    }
-                }
-                if (rowFirstX != -1) {
-                    edgePoints.add(Pair(rowFirstX, y))
-                    if (rowLastX != rowFirstX) {
-                        edgePoints.add(Pair(rowLastX, y))
                     }
                 }
             }
 
-            // Minimum skin area threshold (detects distinct hand)
-            val minSkinThreshold = 30
+            val minSkinThreshold = 25
             if (skinPixelCount > minSkinThreshold) {
-                val palmCenterX = (sumX / skinPixelCount).toFloat() / width
-                val palmCenterY = (sumY / skinPixelCount).toFloat() / height
+                lostFramesCount = 0
+                isCurrentlyTracked = true
 
-                // Calculate hand bounding box span
-                val handWidthNorm = (maxX - minX).toFloat() / width
-                val handHeightNorm = (maxY - minY).toFloat() / height
-                val handArea = handWidthNorm * handHeightNorm
+                var rawCenterX = (sumX / skinPixelCount).toFloat() / imgWidth
+                var rawCenterY = (sumY / skinPixelCount).toFloat() / imgHeight
 
-                // Estimate depth Z based on hand size in frame
-                val estimatedZ = (1.8f - (handArea * 2.2f)).coerceIn(0.7f, 2.2f)
+                var rawMinX = minX.toFloat() / imgWidth
+                var rawMaxX = maxX.toFloat() / imgWidth
+                var rawMinY = minY.toFloat() / imgHeight
+                var rawMaxY = maxY.toFloat() / imgHeight
 
-                // Normalized 3D Position in camera view space
-                val posX = (palmCenterX - 0.5f) * 2.4f
-                val posY = -(palmCenterY - 0.5f) * 1.8f
-                val posZ = estimatedZ
+                // Account for CameraX sensor rotation degrees (landscape 0, 90, 180, 270)
+                val (normX, normY, spanW, spanH) = when (rotationDegrees) {
+                    90 -> {
+                        val nx = rawCenterY
+                        val ny = 1f - rawCenterX
+                        val sw = rawMaxY - rawMinY
+                        val sh = rawMaxX - rawMinX
+                        listOf(nx, ny, sw, sh)
+                    }
+                    270 -> {
+                        val nx = 1f - rawCenterY
+                        val ny = rawCenterX
+                        val sw = rawMaxY - rawMinY
+                        val sh = rawMaxX - rawMinX
+                        listOf(nx, ny, sw, sh)
+                    }
+                    180 -> {
+                        val nx = 1f - rawCenterX
+                        val ny = 1f - rawCenterY
+                        val sw = rawMaxX - rawMinX
+                        val sh = rawMaxY - rawMinY
+                        listOf(nx, ny, sw, sh)
+                    }
+                    else -> {
+                        val nx = rawCenterX
+                        val ny = rawCenterY
+                        val sw = rawMaxX - rawMinX
+                        val sh = rawMaxY - rawMinY
+                        listOf(nx, ny, sw, sh)
+                    }
+                }
 
-                // Dynamic hand dimensions in 3D
-                val spanW = (handWidthNorm * 1.2f).coerceIn(0.12f, 0.35f)
-                val spanH = (handHeightNorm * 1.2f).coerceIn(0.16f, 0.45f)
+                val handArea = spanW * spanH
+                val estimatedZ = (1.5f - (handArea * 1.8f)).coerceIn(0.7f, 2.0f)
 
-                val wristPos = Vector3(posX, posY - spanH * 0.55f, posZ + 0.05f)
+                // 3D coordinates in camera view space
+                val targetPosX = (normX - 0.5f) * 2.2f
+                val targetPosY = -(normY - 0.5f) * 1.6f
+                val targetPosZ = estimatedZ
+
+                // Dynamic hand dimensions
+                val handW = (spanW * 1.1f).coerceIn(0.12f, 0.32f)
+                val handH = (spanH * 1.1f).coerceIn(0.15f, 0.40f)
+
+                // Smooth position with exponential smoothing
+                val lerpRate = 0.55f
+                val posX = lastTrackedHand.position.x + lerpRate * (targetPosX - lastTrackedHand.position.x)
+                val posY = lastTrackedHand.position.y + lerpRate * (targetPosY - lastTrackedHand.position.y)
+                val posZ = lastTrackedHand.position.z + lerpRate * (targetPosZ - lastTrackedHand.position.z)
+
                 val palmPos = Vector3(posX, posY, posZ)
+                val wristPos = Vector3(posX, posY - handH * 0.50f, posZ + 0.05f)
 
-                val thumbTipPos = Vector3(posX - spanW * 0.52f, posY + spanH * 0.12f, posZ - 0.03f)
-                val thumbBasePos = Vector3(posX - spanW * 0.32f, posY - spanH * 0.22f, posZ)
+                // 5 Skeletal Finger Joints & Tips
+                val thumbTipPos = Vector3(posX - handW * 0.45f, posY + handH * 0.10f, posZ - 0.03f)
+                val indexTipPos = Vector3(posX - handW * 0.15f, posY + handH * 0.52f, posZ - 0.06f)
+                val middleTipPos = Vector3(posX + handW * 0.04f, posY + handH * 0.58f, posZ - 0.07f)
+                val ringTipPos = Vector3(posX + handW * 0.22f, posY + handH * 0.46f, posZ - 0.05f)
+                val pinkyTipPos = Vector3(posX + handW * 0.38f, posY + handH * 0.30f, posZ - 0.03f)
 
-                val indexTipPos = Vector3(posX - spanW * 0.20f, posY + spanH * 0.55f, posZ - 0.06f)
-                val indexKnucklePos = Vector3(posX - spanW * 0.16f, posY + spanH * 0.18f, posZ)
-
-                val middleTipPos = Vector3(posX + spanW * 0.02f, posY + spanH * 0.62f, posZ - 0.08f)
-                val middleKnucklePos = Vector3(posX + spanW * 0.02f, posY + spanH * 0.20f, posZ)
-
-                val ringTipPos = Vector3(posX + spanW * 0.22f, posY + spanH * 0.50f, posZ - 0.06f)
-                val ringKnucklePos = Vector3(posX + spanW * 0.18f, posY + spanH * 0.16f, posZ)
-
-                val pinkyTipPos = Vector3(posX + spanW * 0.42f, posY + spanH * 0.34f, posZ - 0.04f)
-                val pinkyKnucklePos = Vector3(posX + spanW * 0.32f, posY + spanH * 0.12f, posZ)
-                val pinkyBasePos = Vector3(posX + spanW * 0.32f, posY - spanH * 0.15f, posZ)
-
-                // Ordered Clockwise Hand Silhouette Contour Envelope (Clean, smooth polygon)
+                // Hand Outer Contour Polygon
                 val contour3D = listOf(
                     wristPos,
-                    thumbBasePos,
+                    Vector3(posX - handW * 0.30f, posY - handH * 0.20f, posZ),
                     thumbTipPos,
-                    indexKnucklePos,
+                    Vector3(posX - handW * 0.20f, posY + handH * 0.20f, posZ),
                     indexTipPos,
-                    middleKnucklePos,
+                    Vector3(posX - handW * 0.05f, posY + handH * 0.30f, posZ),
                     middleTipPos,
-                    ringKnucklePos,
+                    Vector3(posX + handW * 0.12f, posY + handH * 0.28f, posZ),
                     ringTipPos,
-                    pinkyKnucklePos,
+                    Vector3(posX + handW * 0.30f, posY + handH * 0.20f, posZ),
                     pinkyTipPos,
-                    pinkyBasePos,
+                    Vector3(posX + handW * 0.32f, posY - handH * 0.15f, posZ),
                     wristPos
                 )
 
                 val pinchDist = sqrt((indexTipPos.x - thumbTipPos.x).pow(2) + (indexTipPos.y - thumbTipPos.y).pow(2))
-                val isPinching = pinchDist < 0.20f || (handHeightNorm < 0.16f && handWidthNorm < 0.16f)
+                val isPinching = pinchDist < 0.18f || (spanH < 0.14f && spanW < 0.14f)
 
                 val gesture = when {
                     isPinching -> HandGesture.PINCH
-                    palmCenterY > 0.75f && palmCenterX < 0.35f -> HandGesture.PALM_MENU
-                    handHeightNorm > 1.4f * handWidthNorm -> HandGesture.POINTING
-                    handArea > 0.15f -> HandGesture.OPEN_PALM
+                    spanH > 1.35f * spanW -> HandGesture.POINTING
                     else -> HandGesture.OPEN_PALM
                 }
 
-                // Laser Ray shooting from index fingertip forward
+                // Laser Ray shooting from index fingertip forward (Quest 2 style)
                 val rayDir = Vector3(
-                    x = (indexTipPos.x - posX) * 0.6f + posX * 0.3f,
-                    y = (indexTipPos.y - posY) * 0.6f + posY * 0.3f,
+                    x = (indexTipPos.x - posX) * 0.5f + posX * 0.4f,
+                    y = (indexTipPos.y - posY) * 0.5f + posY * 0.4f,
                     z = 1.0f
                 ).normalized()
 
                 val ray = Ray3D(origin = indexTipPos, direction = rayDir)
 
-                // Smooth coordinates with previous frame
-                val smoothFactor = 0.45f
-                val smoothPos = Vector3(
-                    x = lastTrackedHand.position.x + smoothFactor * (palmPos.x - lastTrackedHand.position.x),
-                    y = lastTrackedHand.position.y + smoothFactor * (palmPos.y - lastTrackedHand.position.y),
-                    z = lastTrackedHand.position.z + smoothFactor * (palmPos.z - lastTrackedHand.position.z)
-                )
-
-                val trackedHand = TrackedHand(
+                val tracked = TrackedHand(
                     isTracked = true,
                     isLeft = false,
-                    position = smoothPos,
+                    position = palmPos,
                     wristPosition = wristPos,
                     indexTip = indexTipPos,
                     thumbTip = thumbTipPos,
@@ -215,24 +199,27 @@ class HandTrackerAnalyzer(
                     contourPoints = contour3D,
                     pinchDistance = pinchDist,
                     gesture = gesture,
-                    confidence = (skinPixelCount.toFloat() / 250f).coerceIn(0.5f, 1.0f),
+                    confidence = (skinPixelCount.toFloat() / 200f).coerceIn(0.6f, 1.0f),
                     laserRay = ray,
                     isPinching = isPinching,
-                    isGrabbing = gesture == HandGesture.FIST || isPinching
+                    isGrabbing = isPinching,
+                    color = 0xFF00E5FF
                 )
 
-                lastTrackedHand = trackedHand
-                onHandTracked(trackedHand)
+                lastTrackedHand = tracked
+                onHandTracked(tracked)
             } else {
-                // Decay tracking
-                val untracked = lastTrackedHand.copy(
-                    isTracked = false,
-                    confidence = 0f,
-                    gesture = HandGesture.NONE,
+                lostFramesCount++
+                if (lostFramesCount > 10) {
+                    isCurrentlyTracked = false
+                }
+                // Keep smooth state with fallback
+                val fallbackHand = lastTrackedHand.copy(
+                    isTracked = isCurrentlyTracked,
+                    confidence = if (isCurrentlyTracked) 0.5f else 0f,
                     isPinching = false
                 )
-                lastTrackedHand = untracked
-                onHandTracked(untracked)
+                onHandTracked(fallbackHand)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -241,3 +228,4 @@ class HandTrackerAnalyzer(
         }
     }
 }
+

@@ -141,7 +141,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
         // 1. Real-Time Live External Camera Video Passthrough Feed (MR background)
         if (isPassthroughActive && hasCameraPermission) {
             CameraPassthroughView(
-                useFrontCamera = useFrontCamera,
+                handManager = handManager,
                 modifier = Modifier.fillMaxSize()
             )
         }

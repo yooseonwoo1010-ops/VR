@@ -3,6 +3,7 @@ package com.example.vr.handtracking
 import android.content.Context
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
@@ -82,6 +83,16 @@ class HandTrackingManager(private val context: Context) {
 
     private var cameraProvider: ProcessCameraProvider? = null
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private var currentSurfaceProvider: Preview.SurfaceProvider? = null
+    private var currentLifecycleOwner: LifecycleOwner? = null
+
+    fun setSurfaceProvider(provider: Preview.SurfaceProvider?, lifecycleOwner: LifecycleOwner?) {
+        currentSurfaceProvider = provider
+        if (lifecycleOwner != null) {
+            currentLifecycleOwner = lifecycleOwner
+            bindCameraAnalysis(lifecycleOwner)
+        }
+    }
 
     fun setTrackingSource(source: HandTrackingSource) {
         _trackingSource.value = source
@@ -89,6 +100,7 @@ class HandTrackingManager(private val context: Context) {
 
     fun toggleCameraLens() {
         _useFrontCamera.value = !_useFrontCamera.value
+        currentLifecycleOwner?.let { bindCameraAnalysis(it) }
     }
 
     /**
@@ -162,6 +174,7 @@ class HandTrackingManager(private val context: Context) {
      * Start CameraX analyzer with lifecycle
      */
     fun startCameraTracking(lifecycleOwner: LifecycleOwner) {
+        currentLifecycleOwner = lifecycleOwner
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             try {
@@ -174,6 +187,7 @@ class HandTrackingManager(private val context: Context) {
     }
 
     fun bindCameraAnalysis(lifecycleOwner: LifecycleOwner) {
+        currentLifecycleOwner = lifecycleOwner
         val provider = cameraProvider ?: return
         try {
             provider.unbindAll()
@@ -195,7 +209,15 @@ class HandTrackingManager(private val context: Context) {
                 }
             })
 
-            provider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
+            val surfaceProv = currentSurfaceProvider
+            if (surfaceProv != null) {
+                val preview = Preview.Builder().build().also {
+                    it.surfaceProvider = surfaceProv
+                }
+                provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalysis)
+            } else {
+                provider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }
