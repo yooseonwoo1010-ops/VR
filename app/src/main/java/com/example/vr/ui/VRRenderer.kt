@@ -59,15 +59,7 @@ object VRRenderer {
             drawVRBoxWindow(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, vrBoxWindow)
         }
 
-        // 3. Draw 3D Hand Tracking with Grey Outline Border & Joints
-        if (rightHand.isTracked) {
-            drawTrackedGreyHand(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, rightHand, isRight = true)
-        }
-        if (leftHand.isTracked) {
-            drawTrackedGreyHand(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, leftHand, isRight = false)
-        }
-
-        // 4. Draw 3D Burst Particles
+        // 3. Draw 3D Burst Particles
         drawParticles(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, particles)
 
         // 5. Draw Center Reticle / Crosshair for Head Gaze Aiming (with dwell ring)
@@ -265,7 +257,7 @@ object VRRenderer {
 
             if (pLine1.isVisible) nativeCanvas.drawText("• 가상 세계 3D 공간에 왜곡 없이 고정된 창입니다.", pLine1.screenX, pLine1.screenY, bodyPaint)
             if (pLine2.isVisible) nativeCanvas.drawText("• 고개를 돌려 시야를 이동해도 위치가 완벽히 유지됩니다.", pLine2.screenX, pLine2.screenY, subPaint)
-            if (pLine3.isVisible) nativeCanvas.drawText("• 손을 비추면 회색 테두리 실시간 핸드트래킹이 동작합니다.", pLine3.screenX, pLine3.screenY, subPaint)
+            if (pLine3.isVisible) nativeCanvas.drawText("• 화면 중앙 시선 조준(Gaze Reticle) 또는 화면 터치로 조작합니다.", pLine3.screenX, pLine3.screenY, subPaint)
         }
 
         // 4. Interactive Bottom Action Buttons in 3D World Space

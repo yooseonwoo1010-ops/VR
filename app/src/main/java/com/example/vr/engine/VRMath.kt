@@ -10,6 +10,11 @@ object VRMath {
     /**
      * Projects a 3D world-space coordinate into 2D viewport screen coordinates
      * based on camera position, camera orientation (pitch, yaw, roll), FOV, and screen dimensions.
+     * 
+     * Natural Spatial Computing Laws:
+     * - Head turns Right (yaw > 0) -> World moves Left on screen.
+     * - Head tilts Up (pitch > 0) -> World moves Down on screen.
+     * - Head tilts Clockwise (roll > 0) -> World rotates Counter-Clockwise on screen.
      */
     fun project3DTo2D(
         pointWorld: Vector3,
@@ -20,54 +25,60 @@ object VRMath {
         screenWidth: Float,
         screenHeight: Float,
         fov: Float = 75f,
-        nearClip: Float = 0.1f,
+        nearClip: Float = 0.05f,
         farClip: Float = 100f
     ): ProjectedPoint {
-        // 1. Translate relative to camera position
+        // 1. Translate point relative to camera position in World Space
         val rel = pointWorld - cameraPos
 
-        // 2. Inverse Camera Rotation (World -> View space)
-        // Inverse yaw (-yaw)
-        val cy = cos(-yaw)
-        val sy = sin(-yaw)
-        val x1 = rel.x * cy + rel.z * sy
-        val y1 = rel.y
-        val z1 = -rel.x * sy + rel.z * cy
+        // 2. Camera Orientation Trigonometry
+        val cy = cos(yaw)
+        val sy = sin(yaw)
+        val cp = cos(pitch)
+        val sp = sin(pitch)
+        val cr = cos(roll)
+        val sr = sin(roll)
 
-        // Inverse pitch (-pitch)
-        val cp = cos(-pitch)
-        val sp = sin(-pitch)
-        val x2 = x1
-        val y2 = y1 * cp - z1 * sp
-        val z2 = y1 * sp + z1 * cp
+        // 3. Orthonormal 3x3 Camera View Matrix
+        // Row 0: Camera Right vector in World
+        val m0 = cr * cy - sr * sp * sy
+        val m1 = sr * cp
+        val m2 = -cr * sy - sr * sp * cy
 
-        // Inverse roll (-roll)
-        val cr = cos(-roll)
-        val sr = sin(-roll)
-        val x3 = x2 * cr - y2 * sr
-        val y3 = x2 * sr + y2 * cr
-        val z3 = z2
+        // Row 1: Camera Up vector in World
+        val m3 = -sr * cy - cr * sp * sy
+        val m4 = cr * cp
+        val m5 = sr * sy - cr * sp * cy
 
-        // View space coordinates: x3 (Right), y3 (Up), z3 (Forward)
-        if (z3 <= nearClip || z3 >= farClip) {
-            return ProjectedPoint(0f, 0f, z3, isVisible = false)
+        // Row 2: Camera Forward vector in World (Optical Depth axis)
+        val m6 = cp * sy
+        val m7 = sp
+        val m8 = cp * cy
+
+        // 4. Transform World vector into Camera View Space (X = Right, Y = Up, Z = Forward)
+        val viewX = rel.x * m0 + rel.y * m1 + rel.z * m2
+        val viewY = rel.x * m3 + rel.y * m4 + rel.z * m5
+        val viewZ = rel.x * m6 + rel.y * m7 + rel.z * m8
+
+        // Behind camera or clipped
+        if (viewZ <= nearClip || viewZ >= farClip) {
+            return ProjectedPoint(0f, 0f, viewZ, isVisible = false)
         }
 
-        // 3. Perspective Projection
+        // 5. Symmetric Perspective Camera Projection
         val fovRad = Math.toRadians(fov.toDouble()).toFloat()
         val aspect = screenWidth / max(screenHeight, 1f)
-        val tanHalfFov = tan(fovRad / 2f)
+        val tanHalfFov = tan(fovRad * 0.5f)
 
-        val projX = (x3 / (z3 * tanHalfFov * aspect))
-        val projY = (y3 / (z3 * tanHalfFov))
+        val projX = viewX / (viewZ * tanHalfFov * aspect)
+        val projY = viewY / (viewZ * tanHalfFov)
 
         // Map normalized device coordinates [-1, 1] to screen pixels [0, width], [0, height]
-        // Note: Y is flipped in screen coordinates (0 is top)
+        // Note: In screen coordinates, Y=0 is Top, so positive viewY (Up) maps towards Y=0
         val screenX = (projX + 1f) * 0.5f * screenWidth
         val screenY = (1f - projY) * 0.5f * screenHeight
 
-        // Visible if point is in front of camera
-        return ProjectedPoint(screenX, screenY, z3, isVisible = true)
+        return ProjectedPoint(screenX, screenY, viewZ, isVisible = true)
     }
 
     /**
@@ -79,9 +90,9 @@ object VRMath {
         val cp = cos(pitch)
         val sp = sin(pitch)
         return Vector3(
-            x = sy * cp,
-            y = -sp,
-            z = cy * cp
+            x = cp * sy,
+            y = sp,
+            z = cp * cy
         ).normalized()
     }
 

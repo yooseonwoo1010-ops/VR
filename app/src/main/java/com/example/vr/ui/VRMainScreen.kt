@@ -37,19 +37,15 @@ import kotlinx.coroutines.isActive
 @Composable
 fun VRMainScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Instantiate HeadTracker, HandTrackingManager, and VREnvironmentEngine
+    // Instantiate HeadTracker and VREnvironmentEngine
     val headTracker = remember { HeadTracker(context) }
-    val handManager = remember { HandTrackingManager(context) }
     val vrEngine = remember { VREnvironmentEngine(context) }
 
     // State Collection
     val headOrientation by headTracker.orientation.collectAsState()
-    val rightHand by handManager.rightHand.collectAsState()
-    val leftHand by handManager.leftHand.collectAsState()
-    val trackingSource by handManager.trackingSource.collectAsState()
-    val useFrontCamera by handManager.useFrontCamera.collectAsState()
+    val dummyRightHand = remember { com.example.vr.model.TrackedHand() }
+    val dummyLeftHand = remember { com.example.vr.model.TrackedHand(isLeft = true) }
 
     val displayMode by vrEngine.displayMode.collectAsState()
     val currentExperience by vrEngine.experience.collectAsState()
@@ -67,10 +63,6 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
     val particles by vrEngine.particles.collectAsState()
     val score by vrEngine.score.collectAsState()
     val combo by vrEngine.combo.collectAsState()
-    val lastActionText by vrEngine.lastActionText.collectAsState()
-
-    var isUiVisible by remember { mutableStateOf(true) }
-    var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     var hasCameraPermission by remember {
         mutableStateOf(
@@ -82,31 +74,18 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasCameraPermission = isGranted
-        if (isGranted) {
-            handManager.startCameraTracking(lifecycleOwner)
-        }
     }
 
-    // Start sensors & camera
+    // Start sensors
     DisposableEffect(Unit) {
         headTracker.start()
-        if (hasCameraPermission) {
-            handManager.startCameraTracking(lifecycleOwner)
-        } else {
+        if (!hasCameraPermission) {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
 
         onDispose {
             headTracker.stop()
-            handManager.stop()
             vrEngine.cleanup()
-        }
-    }
-
-    // Bind camera when camera lens changes
-    LaunchedEffect(useFrontCamera) {
-        if (hasCameraPermission) {
-            handManager.bindCameraAnalysis(lifecycleOwner)
         }
     }
 
@@ -117,7 +96,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
             withFrameNanos { now ->
                 val dt = ((now - lastTime) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
                 lastTime = now
-                vrEngine.updateWorld(dt, rightHand, leftHand, headOrientation)
+                vrEngine.updateWorld(dt, dummyRightHand, dummyLeftHand, headOrientation)
             }
         }
     }
@@ -133,7 +112,6 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                     val screenW = size.width.toFloat()
                     val screenH = size.height.toFloat()
                     vrEngine.onScreenTouchPosition(offset.x, offset.y, screenW, screenH, headOrientation)
-                    lastInteractionTime = System.currentTimeMillis()
                 }
             }
             .testTag("vr_main_screen")
@@ -141,7 +119,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
         // 1. Real-Time Live External Camera Video Passthrough Feed (MR background)
         if (isPassthroughActive && hasCameraPermission) {
             CameraPassthroughView(
-                handManager = handManager,
+                useFrontCamera = false,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -163,8 +141,8 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                 planets = planets,
                 targets = targets,
                 particles = particles,
-                rightHand = rightHand,
-                leftHand = leftHand,
+                rightHand = dummyRightHand,
+                leftHand = dummyLeftHand,
                 score = score,
                 combo = combo,
                 modifier = Modifier.fillMaxSize()
@@ -184,13 +162,12 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                 planets = planets,
                 targets = targets,
                 particles = particles,
-                rightHand = rightHand,
-                leftHand = leftHand,
+                rightHand = dummyRightHand,
+                leftHand = dummyLeftHand,
                 score = score,
                 combo = combo,
                 onDragLookAround = { dx, dy ->
                     headTracker.onDrag(dx, dy)
-                    lastInteractionTime = System.currentTimeMillis()
                 },
                 modifier = Modifier.fillMaxSize()
             )

@@ -1,18 +1,20 @@
 package com.example.vr.ui
 
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.example.vr.handtracking.HandTrackingManager
 
 @Composable
 fun CameraPassthroughView(
-    handManager: HandTrackingManager,
+    useFrontCamera: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -24,16 +26,33 @@ fun CameraPassthroughView(
         }
     }
 
-    DisposableEffect(Unit) {
-        handManager.setSurfaceProvider(previewView.surfaceProvider, lifecycleOwner)
-        onDispose {
-            handManager.setSurfaceProvider(null, lifecycleOwner)
-        }
-    }
-
     AndroidView(
         factory = { previewView },
-        modifier = modifier
+        modifier = modifier,
+        update = { view ->
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener({
+                try {
+                    val cameraProvider = cameraProviderFuture.get()
+                    cameraProvider.unbindAll()
+
+                    val cameraSelector = if (useFrontCamera) {
+                        CameraSelector.DEFAULT_FRONT_CAMERA
+                    } else {
+                        CameraSelector.DEFAULT_BACK_CAMERA
+                    }
+
+                    val preview = Preview.Builder().build().also {
+                        it.surfaceProvider = view.surfaceProvider
+                    }
+
+                    cameraProvider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, ContextCompat.getMainExecutor(context))
+        }
     )
 }
+
 

@@ -143,7 +143,7 @@ class HeadTracker(context: Context) : SensorEventListener {
      */
     fun onDrag(deltaX: Float, deltaY: Float, sensitivity: Float = 0.003f) {
         manualYaw += deltaX * sensitivity
-        manualPitch = (manualPitch + deltaY * sensitivity).coerceIn(-1.4f, 1.4f)
+        manualPitch = (manualPitch - deltaY * sensitivity).coerceIn(-1.4f, 1.4f)
         updateOrientationState()
     }
 
@@ -155,7 +155,7 @@ class HeadTracker(context: Context) : SensorEventListener {
         if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR || event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR) {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
 
-            // Landscape mode remapping for VR headset:
+            // Landscape mode remapping for VR headset (phone landscape in headset):
             SensorManager.remapCoordinateSystem(
                 rotationMatrix,
                 SensorManager.AXIS_Y,
@@ -165,8 +165,12 @@ class HeadTracker(context: Context) : SensorEventListener {
 
             SensorManager.getOrientation(remappedMatrix, orientationValues)
 
-            val rawYaw = -orientationValues[0]
-            val rawPitch = orientationValues[1]
+            // Sensor coordinate conversion:
+            // - Turning head right -> rawYaw increases (+)
+            // - Tilting head up -> rawPitch increases (+)
+            // - Tilting head clockwise (right) -> rawRoll increases (+)
+            val rawYaw = orientationValues[0]
+            val rawPitch = -orientationValues[1]
             val rawRoll = orientationValues[2]
 
             if (isFirstReading) {
@@ -197,8 +201,8 @@ class HeadTracker(context: Context) : SensorEventListener {
 
             updateOrientationState()
         } else if (event.sensor.type == Sensor.TYPE_ORIENTATION) {
-            val rawYaw = -Math.toRadians(event.values[0].toDouble()).toFloat()
-            val rawPitch = Math.toRadians(event.values[1].toDouble()).toFloat()
+            val rawYaw = Math.toRadians(event.values[0].toDouble()).toFloat()
+            val rawPitch = -Math.toRadians(event.values[1].toDouble()).toFloat()
             val rawRoll = Math.toRadians(event.values[2].toDouble()).toFloat()
 
             if (isFirstReading) {
