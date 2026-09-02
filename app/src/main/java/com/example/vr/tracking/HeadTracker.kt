@@ -90,10 +90,10 @@ class HeadTracker(context: Context) : SensorEventListener {
     private var manualYaw = 0f
     private var manualPitch = 0f
 
-    // 1-Euro Filters for Yaw, Pitch, Roll
-    private val yawFilter = OneEuroFilter(minCutoff = 0.85f, beta = 0.005f)
-    private val pitchFilter = OneEuroFilter(minCutoff = 0.85f, beta = 0.005f)
-    private val rollFilter = OneEuroFilter(minCutoff = 0.85f, beta = 0.005f)
+    // 1-Euro Filters for Yaw, Pitch, Roll tuned for silky smooth, jitter-free spatial stability
+    private val yawFilter = OneEuroFilter(minCutoff = 0.40f, beta = 0.002f, dCutoff = 1.0f)
+    private val pitchFilter = OneEuroFilter(minCutoff = 0.40f, beta = 0.002f, dCutoff = 1.0f)
+    private val rollFilter = OneEuroFilter(minCutoff = 0.40f, beta = 0.002f, dCutoff = 1.0f)
 
     private var currentPitch = 0f
     private var currentYaw = 0f

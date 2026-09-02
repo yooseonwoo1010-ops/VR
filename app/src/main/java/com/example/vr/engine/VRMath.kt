@@ -5,16 +5,77 @@ import com.example.vr.model.Ray3D
 import com.example.vr.model.Vector3
 import kotlin.math.*
 
+data class ViewPoint(val x: Float, val y: Float, val z: Float) {
+    fun toVector3() = Vector3(x, y, z)
+}
+
 object VRMath {
 
     /**
-     * Projects a 3D world-space coordinate into 2D viewport screen coordinates
-     * based on camera position, camera orientation (pitch, yaw, roll), FOV, and screen dimensions.
-     * 
-     * Natural Spatial Computing Laws:
-     * - Head turns Right (yaw > 0) -> World moves Left on screen.
-     * - Head tilts Up (pitch > 0) -> World moves Down on screen.
-     * - Head tilts Clockwise (roll > 0) -> World rotates Counter-Clockwise on screen.
+     * Converts a 3D world coordinate to camera view space (X: Right, Y: Up, Z: Forward)
+     */
+    fun worldToView(
+        pointWorld: Vector3,
+        cameraPos: Vector3,
+        pitch: Float,
+        yaw: Float,
+        roll: Float
+    ): ViewPoint {
+        val rel = pointWorld - cameraPos
+
+        val cy = cos(yaw)
+        val sy = sin(yaw)
+        val cp = cos(pitch)
+        val sp = sin(pitch)
+        val cr = cos(roll)
+        val sr = sin(roll)
+
+        // 1. Rotate by -yaw around Y axis (look left/right)
+        val x1 = rel.x * cy - rel.z * sy
+        val y1 = rel.y
+        val z1 = rel.x * sy + rel.z * cy
+
+        // 2. Rotate by -pitch around X axis (look up/down)
+        val x2 = x1
+        val y2 = y1 * cp + z1 * sp
+        val z2 = -y1 * sp + z1 * cp
+
+        // 3. Rotate by -roll around Z axis (tilt head)
+        val x3 = x2 * cr + y2 * sr
+        val y3 = -x2 * sr + y2 * cr
+        val z3 = z2
+
+        return ViewPoint(x3, y3, z3)
+    }
+
+    /**
+     * Projects a point from view space to 2D screen coordinates.
+     */
+    fun viewToScreen(
+        viewPoint: ViewPoint,
+        screenWidth: Float,
+        screenHeight: Float,
+        fov: Float = 75f
+    ): ProjectedPoint {
+        if (viewPoint.z <= 0.05f) {
+            return ProjectedPoint(0f, 0f, viewPoint.z, isVisible = false)
+        }
+
+        val fovRad = Math.toRadians(fov.toDouble()).toFloat()
+        val aspect = screenWidth / max(screenHeight, 1f)
+        val tanHalfFov = tan(fovRad * 0.5f)
+
+        val projX = viewPoint.x / (viewPoint.z * tanHalfFov * aspect)
+        val projY = viewPoint.y / (viewPoint.z * tanHalfFov)
+
+        val screenX = (projX + 1f) * 0.5f * screenWidth
+        val screenY = (1f - projY) * 0.5f * screenHeight
+
+        return ProjectedPoint(screenX, screenY, viewPoint.z, isVisible = true)
+    }
+
+    /**
+     * Projects a single 3D point in world space directly to 2D screen coordinates.
      */
     fun project3DTo2D(
         pointWorld: Vector3,
@@ -28,57 +89,65 @@ object VRMath {
         nearClip: Float = 0.05f,
         farClip: Float = 100f
     ): ProjectedPoint {
-        // 1. Translate point relative to camera position in World Space
-        val rel = pointWorld - cameraPos
+        val vp = worldToView(pointWorld, cameraPos, pitch, yaw, roll)
+        if (vp.z <= nearClip || vp.z >= farClip) {
+            return ProjectedPoint(0f, 0f, vp.z, isVisible = false)
+        }
+        return viewToScreen(vp, screenWidth, screenHeight, fov)
+    }
 
-        // 2. Camera Orientation Trigonometry
-        val cy = cos(yaw)
-        val sy = sin(yaw)
-        val cp = cos(pitch)
-        val sp = sin(pitch)
-        val cr = cos(roll)
-        val sr = sin(roll)
+    /**
+     * Clips a 3D polygon in View Space against near plane z >= nearClip (Sutherland-Hodgman algorithm)
+     * and projects all resulting vertices into 2D screen coordinates.
+     * Prevents any distortion, warping, or sudden popping when turning head or looking sideways.
+     */
+    fun projectClippedPolygon(
+        worldPolygon: List<Vector3>,
+        cameraPos: Vector3,
+        pitch: Float,
+        yaw: Float,
+        roll: Float,
+        screenWidth: Float,
+        screenHeight: Float,
+        fov: Float = 75f,
+        nearClip: Float = 0.12f
+    ): List<ProjectedPoint> {
+        if (worldPolygon.size < 3) return emptyList()
 
-        // 3. Orthonormal 3x3 Camera View Matrix
-        // Row 0: Camera Right vector in World
-        val m0 = cr * cy - sr * sp * sy
-        val m1 = sr * cp
-        val m2 = -cr * sy - sr * sp * cy
+        // 1. Transform all vertices into view space
+        val viewVerts = worldPolygon.map { worldToView(it, cameraPos, pitch, yaw, roll) }
 
-        // Row 1: Camera Up vector in World
-        val m3 = -sr * cy - cr * sp * sy
-        val m4 = cr * cp
-        val m5 = sr * sy - cr * sp * cy
+        // 2. Clip polygon against near plane z >= nearClip
+        val clipped = mutableListOf<ViewPoint>()
+        for (i in viewVerts.indices) {
+            val curr = viewVerts[i]
+            val prev = viewVerts[(i + viewVerts.size - 1) % viewVerts.size]
 
-        // Row 2: Camera Forward vector in World (Optical Depth axis)
-        val m6 = cp * sy
-        val m7 = sp
-        val m8 = cp * cy
+            val currInside = curr.z >= nearClip
+            val prevInside = prev.z >= nearClip
 
-        // 4. Transform World vector into Camera View Space (X = Right, Y = Up, Z = Forward)
-        val viewX = rel.x * m0 + rel.y * m1 + rel.z * m2
-        val viewY = rel.x * m3 + rel.y * m4 + rel.z * m5
-        val viewZ = rel.x * m6 + rel.y * m7 + rel.z * m8
-
-        // Behind camera or clipped
-        if (viewZ <= nearClip || viewZ >= farClip) {
-            return ProjectedPoint(0f, 0f, viewZ, isVisible = false)
+            if (currInside) {
+                if (!prevInside) {
+                    // Edge entered the frustum: calculate intersection with z = nearClip
+                    val t = (nearClip - prev.z) / (curr.z - prev.z)
+                    val ix = prev.x + t * (curr.x - prev.x)
+                    val iy = prev.y + t * (curr.y - prev.y)
+                    clipped.add(ViewPoint(ix, iy, nearClip))
+                }
+                clipped.add(curr)
+            } else if (prevInside) {
+                // Edge exited the frustum: calculate intersection with z = nearClip
+                val t = (nearClip - prev.z) / (curr.z - prev.z)
+                val ix = prev.x + t * (curr.x - prev.x)
+                val iy = prev.y + t * (curr.y - prev.y)
+                clipped.add(ViewPoint(ix, iy, nearClip))
+            }
         }
 
-        // 5. Symmetric Perspective Camera Projection
-        val fovRad = Math.toRadians(fov.toDouble()).toFloat()
-        val aspect = screenWidth / max(screenHeight, 1f)
-        val tanHalfFov = tan(fovRad * 0.5f)
+        if (clipped.size < 3) return emptyList()
 
-        val projX = viewX / (viewZ * tanHalfFov * aspect)
-        val projY = viewY / (viewZ * tanHalfFov)
-
-        // Map normalized device coordinates [-1, 1] to screen pixels [0, width], [0, height]
-        // Note: In screen coordinates, Y=0 is Top, so positive viewY (Up) maps towards Y=0
-        val screenX = (projX + 1f) * 0.5f * screenWidth
-        val screenY = (1f - projY) * 0.5f * screenHeight
-
-        return ProjectedPoint(screenX, screenY, viewZ, isVisible = true)
+        // 3. Project clipped vertices onto 2D screen
+        return clipped.map { viewToScreen(it, screenWidth, screenHeight, fov) }
     }
 
     /**
@@ -123,7 +192,7 @@ object VRMath {
         height: Float
     ): Float? {
         val denom = quadNormal.dot(ray.direction)
-        if (abs(denom) < 0.0001f) return null // Ray parallel to plane
+        if (abs(denom) < 0.0001f) return null
 
         val p0l0 = quadCenter - ray.origin
         val t = p0l0.dot(quadNormal) / denom
@@ -132,7 +201,6 @@ object VRMath {
         val hitPoint = ray.getPoint(t)
         val localOffset = hitPoint - quadCenter
 
-        // Check bounding box
         if (abs(localOffset.x) <= width * 0.5f && abs(localOffset.y) <= height * 0.5f) {
             return t
         }

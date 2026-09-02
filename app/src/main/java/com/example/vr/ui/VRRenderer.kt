@@ -130,26 +130,27 @@ object VRRenderer {
         val rightVec = Vector3(1f, 0f, 0f)
         val upVec = Vector3(0f, 1f, 0f)
 
-        // Project 4 Corners of 3D Panel in World Space
+        // Project 4 Corners of 3D Panel in World Space with Near-Plane Polygon Clipping
         val cTL = anchor + rightVec * (-winW * 0.5f) + upVec * (winH * 0.5f)
         val cTR = anchor + rightVec * (winW * 0.5f) + upVec * (winH * 0.5f)
         val cBR = anchor + rightVec * (winW * 0.5f) + upVec * (-winH * 0.5f)
         val cBL = anchor + rightVec * (-winW * 0.5f) + upVec * (-winH * 0.5f)
 
-        val pTL = VRMath.project3DTo2D(cTL, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pTR = VRMath.project3DTo2D(cTR, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pBR = VRMath.project3DTo2D(cBR, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pBL = VRMath.project3DTo2D(cBL, cameraPos, pitch, yaw, roll, width, height, fov)
+        val outerPolygon = listOf(cTL, cTR, cBR, cBL)
+        val panelPts = VRMath.projectClippedPolygon(outerPolygon, cameraPos, pitch, yaw, roll, width, height, fov)
 
-        if (!pTL.isVisible || !pTR.isVisible || !pBR.isVisible || !pBL.isVisible) return
+        if (panelPts.size < 3) return
 
         val panelPath = Path().apply {
-            moveTo(pTL.screenX, pTL.screenY)
-            lineTo(pTR.screenX, pTR.screenY)
-            lineTo(pBR.screenX, pBR.screenY)
-            lineTo(pBL.screenX, pBL.screenY)
+            moveTo(panelPts[0].screenX, panelPts[0].screenY)
+            for (i in 1 until panelPts.size) {
+                lineTo(panelPts[i].screenX, panelPts[i].screenY)
+            }
             close()
         }
+
+        val minY = panelPts.minOf { it.screenY }
+        val maxY = panelPts.maxOf { it.screenY }
 
         // 1. Solid Slate Grey 3D Window Body (Meta Quest Style)
         drawScope.drawPath(
@@ -160,8 +161,8 @@ object VRRenderer {
                     Color(0xFA171C23),
                     Color(0xFE0E1116)
                 ),
-                startY = min(pTL.screenY, pTR.screenY),
-                endY = max(pBL.screenY, pBR.screenY)
+                startY = minY,
+                endY = maxY
             )
         )
 
@@ -178,8 +179,9 @@ object VRRenderer {
         }
 
         val nativeCanvas = drawScope.drawContext.canvas.nativeCanvas
-        val avgDepth = (pTL.depth + pTR.depth + pBR.depth + pBL.depth) * 0.25f
-        val textScale = (1.5f / avgDepth) * width * 0.18f
+        val pCenter = VRMath.project3DTo2D(anchor, cameraPos, pitch, yaw, roll, width, height, fov)
+        val depthForScale = if (pCenter.isVisible && pCenter.depth > 0.1f) pCenter.depth else panelPts.map { it.depth }.average().toFloat().coerceAtLeast(0.5f)
+        val textScale = (1.5f / depthForScale) * width * 0.18f
 
         // 2. Window Header (Title & Status)
         val pTitle = VRMath.project3DTo2D(get3DPoint(0.06f, 0.10f), cameraPos, pitch, yaw, roll, width, height, fov)
@@ -220,17 +222,18 @@ object VRRenderer {
         }
 
         // 3. Recessed Body Content Panel
-        val bTL = VRMath.project3DTo2D(get3DPoint(0.04f, 0.20f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val bTR = VRMath.project3DTo2D(get3DPoint(0.96f, 0.20f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val bBR = VRMath.project3DTo2D(get3DPoint(0.96f, 0.66f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val bBL = VRMath.project3DTo2D(get3DPoint(0.04f, 0.66f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val bTL = get3DPoint(0.04f, 0.20f)
+        val bTR = get3DPoint(0.96f, 0.20f)
+        val bBR = get3DPoint(0.96f, 0.66f)
+        val bBL = get3DPoint(0.04f, 0.66f)
+        val bodyPts = VRMath.projectClippedPolygon(listOf(bTL, bTR, bBR, bBL), cameraPos, pitch, yaw, roll, width, height, fov)
 
-        if (bTL.isVisible && bTR.isVisible && bBR.isVisible && bBL.isVisible) {
+        if (bodyPts.size >= 3) {
             val bodyPath = Path().apply {
-                moveTo(bTL.screenX, bTL.screenY)
-                lineTo(bTR.screenX, bTR.screenY)
-                lineTo(bBR.screenX, bBR.screenY)
-                lineTo(bBL.screenX, bBL.screenY)
+                moveTo(bodyPts[0].screenX, bodyPts[0].screenY)
+                for (i in 1 until bodyPts.size) {
+                    lineTo(bodyPts[i].screenX, bodyPts[i].screenY)
+                }
                 close()
             }
             drawScope.drawPath(bodyPath, color = Color(0xF20F1217))
@@ -282,17 +285,19 @@ object VRRenderer {
             val v1 = 0.72f
             val v2 = 0.92f
 
-            val btTL = VRMath.project3DTo2D(get3DPoint(u1, v1), cameraPos, pitch, yaw, roll, width, height, fov)
-            val btTR = VRMath.project3DTo2D(get3DPoint(u2, v1), cameraPos, pitch, yaw, roll, width, height, fov)
-            val btBR = VRMath.project3DTo2D(get3DPoint(u2, v2), cameraPos, pitch, yaw, roll, width, height, fov)
-            val btBL = VRMath.project3DTo2D(get3DPoint(u1, v2), cameraPos, pitch, yaw, roll, width, height, fov)
+            val btTL = get3DPoint(u1, v1)
+            val btTR = get3DPoint(u2, v1)
+            val btBR = get3DPoint(u2, v2)
+            val btBL = get3DPoint(u1, v2)
 
-            if (btTL.isVisible && btTR.isVisible && btBR.isVisible && btBL.isVisible) {
+            val btnPts = VRMath.projectClippedPolygon(listOf(btTL, btTR, btBR, btBL), cameraPos, pitch, yaw, roll, width, height, fov)
+
+            if (btnPts.size >= 3) {
                 val btnPath = Path().apply {
-                    moveTo(btTL.screenX, btTL.screenY)
-                    lineTo(btTR.screenX, btTR.screenY)
-                    lineTo(btBR.screenX, btBR.screenY)
-                    lineTo(btBL.screenX, btBL.screenY)
+                    moveTo(btnPts[0].screenX, btnPts[0].screenY)
+                    for (k in 1 until btnPts.size) {
+                        lineTo(btnPts[k].screenX, btnPts[k].screenY)
+                    }
                     close()
                 }
 
