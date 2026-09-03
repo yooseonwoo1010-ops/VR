@@ -1,0 +1,1 @@
+sed -i 's/import android.hardware.SensorManager/import android.hardware.SensorManager\nimport android.view.WindowManager\nimport android.view.Surface/g' app/src/main/java/com/example/vr/tracking/HeadTracker.kt

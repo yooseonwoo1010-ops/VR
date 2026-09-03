@@ -5,6 +5,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.view.WindowManager
+import android.view.Surface
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,56 +21,8 @@ data class HeadOrientation(
     val rollDeg: Float = 0f
 )
 
-/**
- * 1-Euro Filter for rock-solid IMU tracking without jitter or lag (Meta Quest standard).
- */
-class OneEuroFilter(
-    private val minCutoff: Float = 1.0f,
-    private val beta: Float = 0.007f,
-    private val dCutoff: Float = 1.0f
-) {
-    private var xPrev: Float? = null
-    private var dxPrev = 0f
-    private var tPrev: Long = 0L
 
-    private fun alpha(rate: Float, cutoff: Float): Float {
-        val tau = 1.0f / (2f * Math.PI.toFloat() * cutoff)
-        val te = 1.0f / rate
-        return 1.0f / (1.0f + tau / te)
-    }
-
-    fun filter(x: Float, timestampNs: Long): Float {
-        if (xPrev == null) {
-            xPrev = x
-            tPrev = timestampNs
-            return x
-        }
-
-        val dt = ((timestampNs - tPrev) / 1_000_000_000f).coerceIn(0.001f, 0.1f)
-        tPrev = timestampNs
-        val rate = 1.0f / dt
-
-        // Estimate derivative (speed)
-        val dx = (x - xPrev!!) * rate
-        val aD = alpha(rate, dCutoff)
-        val dxHat = aD * dx + (1f - aD) * dxPrev
-        dxPrev = dxHat
-
-        // Adaptive cutoff frequency based on speed
-        val cutoff = minCutoff + beta * abs(dxHat)
-        val a = alpha(rate, cutoff)
-        val xHat = a * x + (1f - a) * xPrev!!
-        xPrev = xHat
-        return xHat
-    }
-
-    fun reset() {
-        xPrev = null
-        dxPrev = 0f
-    }
-}
-
-class HeadTracker(context: Context) : SensorEventListener {
+class HeadTracker(private val context: Context) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val rotationSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
@@ -87,11 +41,6 @@ class HeadTracker(context: Context) : SensorEventListener {
     // Touch drag offsets for manual flat-mode control
     private var manualYaw = 0f
     private var manualPitch = 0f
-
-    // Smooth filtering
-    private val yawFilter = OneEuroFilter(minCutoff = 0.8f, beta = 0.005f)
-    private val pitchFilter = OneEuroFilter(minCutoff = 0.8f, beta = 0.005f)
-    private val rollFilter = OneEuroFilter(minCutoff = 0.8f, beta = 0.005f)
 
     private var currentPitch = 0f
     private var currentYaw = 0f
@@ -128,9 +77,6 @@ class HeadTracker(context: Context) : SensorEventListener {
         yawOffset = currentYaw
         manualYaw = 0f
         manualPitch = 0f
-        yawFilter.reset()
-        pitchFilter.reset()
-        rollFilter.reset()
         updateOrientationState()
     }
 
@@ -150,11 +96,35 @@ class HeadTracker(context: Context) : SensorEventListener {
         if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR || event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR) {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
 
-            // Landscape mode remapping for VR headset (phone landscape in headset):
+            val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            val rotation = windowManager.defaultDisplay.rotation
+
+            var axisX = SensorManager.AXIS_X
+            var axisY = SensorManager.AXIS_Y
+
+            when (rotation) {
+                Surface.ROTATION_90 -> {
+                    axisX = SensorManager.AXIS_Y
+                    axisY = SensorManager.AXIS_MINUS_X
+                }
+                Surface.ROTATION_270 -> {
+                    axisX = SensorManager.AXIS_MINUS_Y
+                    axisY = SensorManager.AXIS_X
+                }
+                Surface.ROTATION_180 -> {
+                    axisX = SensorManager.AXIS_MINUS_X
+                    axisY = SensorManager.AXIS_MINUS_Y
+                }
+                else -> {
+                    axisX = SensorManager.AXIS_X
+                    axisY = SensorManager.AXIS_Y
+                }
+            }
+
             SensorManager.remapCoordinateSystem(
                 rotationMatrix,
-                SensorManager.AXIS_Y,
-                SensorManager.AXIS_MINUS_X,
+                axisX,
+                axisY,
                 remappedMatrix
             )
 
@@ -176,11 +146,9 @@ class HeadTracker(context: Context) : SensorEventListener {
                 while (diffYaw < -Math.PI) diffYaw += (2 * Math.PI).toFloat()
                 while (diffYaw > Math.PI) diffYaw -= (2 * Math.PI).toFloat()
                 
-                val unwrappedYaw = currentYaw + diffYaw
-                
-                currentYaw = yawFilter.filter(unwrappedYaw, timestamp)
-                currentPitch = pitchFilter.filter(rawPitch, timestamp)
-                currentRoll = rollFilter.filter(rawRoll, timestamp)
+                currentYaw += diffYaw
+                currentPitch = rawPitch
+                currentRoll = rawRoll
             }
 
             updateOrientationState()
@@ -200,11 +168,9 @@ class HeadTracker(context: Context) : SensorEventListener {
                 while (diffYaw < -Math.PI) diffYaw += (2 * Math.PI).toFloat()
                 while (diffYaw > Math.PI) diffYaw -= (2 * Math.PI).toFloat()
                 
-                val unwrappedYaw = currentYaw + diffYaw
-                
-                currentYaw = yawFilter.filter(unwrappedYaw, timestamp)
-                currentPitch = pitchFilter.filter(rawPitch, timestamp)
-                currentRoll = rollFilter.filter(rawRoll, timestamp)
+                currentYaw += diffYaw
+                currentPitch = rawPitch
+                currentRoll = rawRoll
             }
 
             updateOrientationState()
@@ -215,7 +181,7 @@ class HeadTracker(context: Context) : SensorEventListener {
         // Do not scale angles! Scaling angles destroys the orthogonal rotation matrix and causes severe parallelogram skewing.
         // The VR Window MUST be world-locked and aligned with physical gravity, so we ONLY offset the Yaw axis.
         val finalYaw = (currentYaw - yawOffset) + manualYaw
-        val finalPitch = (currentPitch + manualPitch).coerceIn(-1.5f, 1.5f)
+        val finalPitch = currentPitch + manualPitch
         val finalRoll = currentRoll
 
         _orientation.value = HeadOrientation(
