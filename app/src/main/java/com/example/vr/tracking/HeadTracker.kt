@@ -104,12 +104,12 @@ class HeadTracker(private val context: Context) : SensorEventListener {
 
             when (rotation) {
                 Surface.ROTATION_90 -> {
-                    axisX = SensorManager.AXIS_Y
-                    axisY = SensorManager.AXIS_MINUS_X
-                }
-                Surface.ROTATION_270 -> {
                     axisX = SensorManager.AXIS_MINUS_Y
                     axisY = SensorManager.AXIS_X
+                }
+                Surface.ROTATION_270 -> {
+                    axisX = SensorManager.AXIS_Y
+                    axisY = SensorManager.AXIS_MINUS_X
                 }
                 Surface.ROTATION_180 -> {
                     axisX = SensorManager.AXIS_MINUS_X
