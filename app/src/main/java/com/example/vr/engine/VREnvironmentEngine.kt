@@ -76,7 +76,7 @@ class VREnvironmentEngine(private val context: Context) {
     val ipdMm: StateFlow<Float> = _ipdMm.asStateFlow()
 
     // Field of View
-    private val _fov = MutableStateFlow(55f)
+    private val _fov = MutableStateFlow(85f)
     val fov: StateFlow<Float> = _fov.asStateFlow()
 
     // Universal Menu Open/Closed state
