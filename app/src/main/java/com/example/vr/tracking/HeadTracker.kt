@@ -90,11 +90,6 @@ class HeadTracker(context: Context) : SensorEventListener {
     private var manualYaw = 0f
     private var manualPitch = 0f
 
-    // 1-Euro Filters for Yaw, Pitch, Roll tuned for silky smooth, jitter-free spatial stability
-    private val yawFilter = OneEuroFilter(minCutoff = 0.40f, beta = 0.002f, dCutoff = 1.0f)
-    private val pitchFilter = OneEuroFilter(minCutoff = 0.40f, beta = 0.002f, dCutoff = 1.0f)
-    private val rollFilter = OneEuroFilter(minCutoff = 0.40f, beta = 0.002f, dCutoff = 1.0f)
-
     private var currentPitch = 0f
     private var currentYaw = 0f
     private var currentRoll = 0f
@@ -107,7 +102,7 @@ class HeadTracker(context: Context) : SensorEventListener {
 
     fun start() {
         if (!isRegistered && rotationSensor != null) {
-            sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_FASTEST)
+            sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
             isRegistered = true
         }
     }
@@ -132,9 +127,6 @@ class HeadTracker(context: Context) : SensorEventListener {
         rollOffset = currentRoll
         manualYaw = 0f
         manualPitch = 0f
-        yawFilter.reset()
-        pitchFilter.reset()
-        rollFilter.reset()
         updateOrientationState()
     }
 
@@ -149,8 +141,6 @@ class HeadTracker(context: Context) : SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null || !isSensorEnabled) return
-
-        val timestamp = event.timestamp
 
         if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR || event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR) {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
@@ -182,21 +172,14 @@ class HeadTracker(context: Context) : SensorEventListener {
                 rollOffset = rawRoll
                 isFirstReading = false
             } else {
-                // Shortest angular difference for yaw unwrapping
-                var unwrapYaw = rawYaw
-                var diffYaw = unwrapYaw - currentYaw
-                while (diffYaw < -Math.PI) {
-                    unwrapYaw += (2 * Math.PI).toFloat()
-                    diffYaw = unwrapYaw - currentYaw
-                }
-                while (diffYaw > Math.PI) {
-                    unwrapYaw -= (2 * Math.PI).toFloat()
-                    diffYaw = unwrapYaw - currentYaw
-                }
-
-                currentYaw = yawFilter.filter(unwrapYaw, timestamp)
-                currentPitch = pitchFilter.filter(rawPitch, timestamp)
-                currentRoll = rollFilter.filter(rawRoll, timestamp)
+                // Shortest angular difference for yaw unwrapping to prevent jumps
+                var diffYaw = rawYaw - currentYaw
+                while (diffYaw < -Math.PI) diffYaw += (2 * Math.PI).toFloat()
+                while (diffYaw > Math.PI) diffYaw -= (2 * Math.PI).toFloat()
+                
+                currentYaw += diffYaw
+                currentPitch = rawPitch
+                currentRoll = rawRoll
             }
 
             updateOrientationState()
@@ -214,20 +197,13 @@ class HeadTracker(context: Context) : SensorEventListener {
                 rollOffset = rawRoll
                 isFirstReading = false
             } else {
-                var unwrapYaw = rawYaw
-                var diffYaw = unwrapYaw - currentYaw
-                while (diffYaw < -Math.PI) {
-                    unwrapYaw += (2 * Math.PI).toFloat()
-                    diffYaw = unwrapYaw - currentYaw
-                }
-                while (diffYaw > Math.PI) {
-                    unwrapYaw -= (2 * Math.PI).toFloat()
-                    diffYaw = unwrapYaw - currentYaw
-                }
-
-                currentYaw = yawFilter.filter(unwrapYaw, timestamp)
-                currentPitch = pitchFilter.filter(rawPitch, timestamp)
-                currentRoll = rollFilter.filter(rawRoll, timestamp)
+                var diffYaw = rawYaw - currentYaw
+                while (diffYaw < -Math.PI) diffYaw += (2 * Math.PI).toFloat()
+                while (diffYaw > Math.PI) diffYaw -= (2 * Math.PI).toFloat()
+                
+                currentYaw += diffYaw
+                currentPitch = rawPitch
+                currentRoll = rawRoll
             }
 
             updateOrientationState()
@@ -235,9 +211,11 @@ class HeadTracker(context: Context) : SensorEventListener {
     }
 
     private fun updateOrientationState() {
-        val finalYaw = (currentYaw - yawOffset) + manualYaw
-        val finalPitch = ((currentPitch - pitchOffset) + manualPitch).coerceIn(-1.5f, 1.5f)
-        val finalRoll = (currentRoll - rollOffset)
+        // Apply a small damping factor (0.6f) to make the flat mode less erratic and overly sensitive.
+        val gyroSensitivity = 0.6f
+        val finalYaw = (currentYaw - yawOffset) * gyroSensitivity + manualYaw
+        val finalPitch = ((currentPitch - pitchOffset) * gyroSensitivity + manualPitch).coerceIn(-1.5f, 1.5f)
+        val finalRoll = (currentRoll - rollOffset) * gyroSensitivity
 
         _orientation.value = HeadOrientation(
             pitch = finalPitch,

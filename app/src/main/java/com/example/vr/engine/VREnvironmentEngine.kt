@@ -76,7 +76,7 @@ class VREnvironmentEngine(private val context: Context) {
     val ipdMm: StateFlow<Float> = _ipdMm.asStateFlow()
 
     // Field of View
-    private val _fov = MutableStateFlow(80f)
+    private val _fov = MutableStateFlow(55f)
     val fov: StateFlow<Float> = _fov.asStateFlow()
 
     // Universal Menu Open/Closed state
@@ -198,7 +198,7 @@ class VREnvironmentEngine(private val context: Context) {
     }
 
     fun setFov(fov: Float) {
-        _fov.value = fov.coerceIn(60f, 100f)
+        _fov.value = fov.coerceIn(40f, 100f)
     }
 
     fun toggleMenu() {
