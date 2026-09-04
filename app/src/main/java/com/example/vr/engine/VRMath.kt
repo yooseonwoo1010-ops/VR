@@ -13,32 +13,14 @@ object VRMath {
     fun worldToView(
         pointWorld: Vector3,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float
+        viewMatrix: FloatArray
     ): ViewPoint {
         val rel = pointWorld - cameraPos
+        val pointVec = floatArrayOf(rel.x, rel.y, rel.z, 1f)
+        val resultVec = FloatArray(4)
+        Matrix.multiplyMV(resultVec, 0, viewMatrix, 0, pointVec, 0)
         
-        val cy = cos(yaw)
-        val sy = sin(yaw)
-        val cp = cos(pitch)
-        val sp = sin(pitch)
-        val cr = cos(roll)
-        val sr = sin(roll)
-        
-        val x1 = rel.x * cy - rel.z * sy
-        val y1 = rel.y
-        val z1 = rel.x * sy + rel.z * cy
-        
-        val x2 = x1
-        val y2 = y1 * cp - z1 * sp
-        val z2 = y1 * sp + z1 * cp
-        
-        val x3 = x2 * cr + y2 * sr
-        val y3 = -x2 * sr + y2 * cr
-        val z3 = z2
-        
-        return ViewPoint(x3, y3, z3)
+        return ViewPoint(resultVec[0], resultVec[1], resultVec[2])
     }
 
     fun viewToScreen(
@@ -51,28 +33,28 @@ object VRMath {
         val fovRad = Math.toRadians(fov.toDouble()).toFloat()
         val f = 1.0f / tan(fovRad / 2.0f)
         
-        val projX = (vp.x * f) / vp.z
-        val projY = (vp.y * f * aspect) / vp.z
+        val zDepth = vp.z
+        
+        val projX = (vp.x * f) / zDepth
+        val projY = (vp.y * f * aspect) / zDepth
         
         val screenX = (projX + 1f) * 0.5f * screenWidth
         val screenY = (1f - projY) * 0.5f * screenHeight
         
-        return ProjectedPoint(screenX, screenY, vp.z, isVisible = true)
+        return ProjectedPoint(screenX, screenY, zDepth, isVisible = true)
     }
 
     fun project3DTo2D(
         pointWorld: Vector3,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         screenWidth: Float,
         screenHeight: Float,
         fov: Float = 75f,
         nearClip: Float = 0.05f,
         farClip: Float = 100f
     ): ProjectedPoint {
-        val vp = worldToView(pointWorld, cameraPos, pitch, yaw, roll)
+        val vp = worldToView(pointWorld, cameraPos, viewMatrix)
         if (vp.z <= nearClip || vp.z >= farClip) {
             return ProjectedPoint(0f, 0f, vp.z, isVisible = false)
         }
@@ -82,12 +64,10 @@ object VRMath {
     fun clipPolygon(
         vertices: List<Vector3>,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         nearClip: Float = 0.05f
     ): List<ViewPoint> {
-        val viewPoints = vertices.map { worldToView(it, cameraPos, pitch, yaw, roll) }
+        val viewPoints = vertices.map { worldToView(it, cameraPos, viewMatrix) }
         val output = mutableListOf<ViewPoint>()
         if (viewPoints.isEmpty()) return output
         
@@ -112,29 +92,41 @@ object VRMath {
         return output
     }
 
-    fun getForwardVector(pitch: Float, yaw: Float, roll: Float): Vector3 {
-        val cp = cos(pitch)
-        val sp = sin(pitch)
-        val cy = cos(yaw)
-        val sy = sin(yaw)
+    fun getForwardVector(viewMatrix: FloatArray): Vector3 {
+        val cameraMatrix = FloatArray(16)
+        Matrix.invertM(cameraMatrix, 0, viewMatrix, 0)
         
-        val x = sy * cp
-        val y = sp
-        val z = cy * cp
-        return Vector3(x, y, z)
+        val fwd = floatArrayOf(0f, 0f, 1f, 0f)
+        val res = FloatArray(4)
+        Matrix.multiplyMV(res, 0, cameraMatrix, 0, fwd, 0)
+        
+        return Vector3(res[0], res[1], res[2]).normalized()
+    }
+
+    fun getForwardVector(pitch: Float, yaw: Float, roll: Float): Vector3 {
+        val matrix = FloatArray(16)
+        Matrix.setIdentityM(matrix, 0)
+        
+        Matrix.rotateM(matrix, 0, Math.toDegrees(yaw.toDouble()).toFloat(), 0f, 1f, 0f)
+        Matrix.rotateM(matrix, 0, Math.toDegrees(-pitch.toDouble()).toFloat(), 1f, 0f, 0f)
+        Matrix.rotateM(matrix, 0, Math.toDegrees(roll.toDouble()).toFloat(), 0f, 0f, 1f)
+        
+        val fwd = floatArrayOf(0f, 0f, 1f, 0f)
+        val res = FloatArray(4)
+        Matrix.multiplyMV(res, 0, matrix, 0, fwd, 0)
+        
+        return Vector3(res[0], res[1], res[2]).normalized()
     }
 
     fun projectClippedPolygon(
         vertices: List<Vector3>,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         screenWidth: Float,
         screenHeight: Float,
         fov: Float = 75f
     ): List<ProjectedPoint> {
-        val clipped = clipPolygon(vertices, cameraPos, pitch, yaw, roll)
+        val clipped = clipPolygon(vertices, cameraPos, viewMatrix)
         return clipped.map { viewToScreen(it, screenWidth, screenHeight, fov) }
     }
 

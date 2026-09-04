@@ -30,6 +30,11 @@ import com.example.vr.handtracking.HandTrackingManager
 import com.example.vr.model.HandTrackingSource
 import com.example.vr.model.VRDisplayMode
 import com.example.vr.model.VRExperience
+
+import com.example.vr.tracking.MediaPipeHandTracker
+import com.example.vr.tracking.HandResultMapper
+import com.example.vr.model.TrackedHand
+
 import com.example.vr.tracking.HeadTracker
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -44,8 +49,24 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
 
     // State Collection
     val headOrientation by headTracker.orientation.collectAsState()
-    val dummyRightHand = remember { com.example.vr.model.TrackedHand() }
-    val dummyLeftHand = remember { com.example.vr.model.TrackedHand(isLeft = true) }
+    
+    var rightHand by remember { mutableStateOf(TrackedHand()) }
+    var leftHand by remember { mutableStateOf(TrackedHand(isLeft = true)) }
+
+    val handTracker = remember {
+        try {
+            MediaPipeHandTracker(context) { result ->
+                val hands = HandResultMapper.mapToTrackedHands(result)
+                if (hands.first.isTracked) rightHand = hands.first
+                if (hands.second.isTracked) leftHand = hands.second
+            }
+        } catch (e: Throwable) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    
 
     val displayMode by vrEngine.displayMode.collectAsState()
     val currentExperience by vrEngine.experience.collectAsState()
@@ -76,16 +97,16 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
         hasCameraPermission = isGranted
     }
 
+    LaunchedEffect(Unit) { if (!hasCameraPermission) { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) } }
     // Start sensors
     DisposableEffect(Unit) {
         headTracker.start()
-        if (!hasCameraPermission) {
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-        }
-
         onDispose {
+            
             headTracker.stop()
+            handTracker?.close()
             vrEngine.cleanup()
+
         }
     }
 
@@ -96,7 +117,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
             withFrameNanos { now ->
                 val dt = ((now - lastTime) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
                 lastTime = now
-                vrEngine.updateWorld(dt, dummyRightHand, dummyLeftHand, headOrientation)
+                vrEngine.updateWorld(dt, rightHand, leftHand, headOrientation)
             }
         }
     }
@@ -120,6 +141,9 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
         if (isPassthroughActive && hasCameraPermission) {
             CameraPassthroughView(
                 useFrontCamera = false,
+                onImageProxy = { imageProxy ->
+                    handTracker?.processImageProxy(imageProxy, false)
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -141,8 +165,8 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                 planets = planets,
                 targets = targets,
                 particles = particles,
-                rightHand = dummyRightHand,
-                leftHand = dummyLeftHand,
+                rightHand = rightHand,
+                leftHand = leftHand,
                 score = score,
                 combo = combo,
                 modifier = Modifier.fillMaxSize()
@@ -162,8 +186,8 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                 planets = planets,
                 targets = targets,
                 particles = particles,
-                rightHand = dummyRightHand,
-                leftHand = dummyLeftHand,
+                rightHand = rightHand,
+                leftHand = leftHand,
                 score = score,
                 combo = combo,
                 onDragLookAround = { dx, dy ->

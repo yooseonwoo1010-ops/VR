@@ -1,0 +1,2 @@
+sed -i 's/Matrix.rotateM(viewMatrix, 0, Math.toDegrees(-yaw.toDouble()).toFloat(), 0f, 1f, 0f)/Matrix.rotateM(viewMatrix, 0, Math.toDegrees(-roll.toDouble()).toFloat(), 0f, 0f, 1f)/g' app/src/main/java/com/example/vr/engine/VRMath.kt
+sed -i 's/Matrix.rotateM(viewMatrix, 0, Math.toDegrees(-roll.toDouble()).toFloat(), 0f, 0f, 1f)/Matrix.rotateM(viewMatrix, 0, Math.toDegrees(-yaw.toDouble()).toFloat(), 0f, 1f, 0f)/g' app/src/main/java/com/example/vr/engine/VRMath.kt

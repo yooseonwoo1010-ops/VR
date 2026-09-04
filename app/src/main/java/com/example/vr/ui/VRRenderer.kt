@@ -41,35 +41,31 @@ object VRRenderer {
     ) {
         val width = drawScope.size.width
         val height = drawScope.size.height
-        val pitch = headOrientation.pitch
-        val yaw = headOrientation.yaw
-        val roll = headOrientation.roll
+        val viewMatrix = headOrientation.viewMatrix
 
         val isPassthrough = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
 
         // 1. Draw Starfield / Sky Space Background (when camera passthrough is off, or subtle grid)
         if (!isPassthrough) {
-            drawSkyAndGrid(drawScope, cameraPos, pitch, yaw, roll, width, height, fov)
+            drawSkyAndGrid(drawScope, cameraPos, viewMatrix, width, height, fov)
         } else {
-            drawPassthroughGridOverlay(drawScope, cameraPos, pitch, yaw, roll, width, height, fov)
+            drawPassthroughGridOverlay(drawScope, cameraPos, viewMatrix, width, height, fov)
         }
 
         // 2. Draw 3D World-Anchored Grey Rounded-Corner Spatial Window (Fixed in 3D virtual world)
         if (vrBoxWindow.isVisible) {
-            drawVRBoxWindow(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, vrBoxWindow)
+            drawVRBoxWindow(drawScope, cameraPos, viewMatrix, width, height, fov, vrBoxWindow)
         }
 
         // 3. Draw 3D Burst Particles
-        drawParticles(drawScope, cameraPos, pitch, yaw, roll, width, height, fov, particles)
+        drawParticles(drawScope, cameraPos, viewMatrix, width, height, fov, particles)
 
         // 5. Draw Center Reticle / Crosshair for Head Gaze Aiming (with dwell ring)
-        val forwardDir = VRMath.getForwardVector(pitch, yaw, roll)
+        val forwardDir = VRMath.getForwardVector(viewMatrix)
         val centerProj = VRMath.project3DTo2D(
             pointWorld = cameraPos + forwardDir * 2.0f,
             cameraPos = cameraPos,
-            pitch = pitch,
-            yaw = yaw,
-            roll = roll,
+            viewMatrix = viewMatrix,
             screenWidth = width,
             screenHeight = height,
             fov = fov
@@ -116,9 +112,7 @@ object VRRenderer {
     private fun drawVRBoxWindow(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
@@ -137,7 +131,7 @@ object VRRenderer {
         val cBL = anchor + rightVec * (-winW * 0.5f) + upVec * (-winH * 0.5f)
 
         val outerPolygon = listOf(cTL, cTR, cBR, cBL)
-        val panelPts = VRMath.projectClippedPolygon(outerPolygon, cameraPos, pitch, yaw, roll, width, height, fov)
+        val panelPts = VRMath.projectClippedPolygon(outerPolygon, cameraPos, viewMatrix, width, height, fov)
 
         if (panelPts.size < 3) return
 
@@ -179,12 +173,12 @@ object VRRenderer {
         }
 
         val nativeCanvas = drawScope.drawContext.canvas.nativeCanvas
-        val pCenter = VRMath.project3DTo2D(anchor, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pCenter = VRMath.project3DTo2D(anchor, cameraPos, viewMatrix, width, height, fov)
         val depthForScale = if (pCenter.isVisible && pCenter.depth > 0.1f) pCenter.depth else panelPts.map { it.depth }.average().toFloat().coerceAtLeast(0.5f)
         val textScale = (1.5f / depthForScale) * width * 0.18f
 
         // 2. Window Header (Title & Status)
-        val pTitle = VRMath.project3DTo2D(get3DPoint(0.06f, 0.10f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val pTitle = VRMath.project3DTo2D(get3DPoint(0.06f, 0.10f), cameraPos, viewMatrix, width, height, fov)
         if (pTitle.isVisible) {
             val titlePaint = android.graphics.Paint().apply {
                 color = android.graphics.Color.WHITE
@@ -196,7 +190,7 @@ object VRRenderer {
             nativeCanvas.drawText("VR SPATIAL WINDOW", pTitle.screenX, pTitle.screenY, titlePaint)
         }
 
-        val pStatus = VRMath.project3DTo2D(get3DPoint(0.94f, 0.10f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val pStatus = VRMath.project3DTo2D(get3DPoint(0.94f, 0.10f), cameraPos, viewMatrix, width, height, fov)
         if (pStatus.isVisible) {
             val statusPaint = android.graphics.Paint().apply {
                 color = if (win.isPassthroughActive) android.graphics.Color.parseColor("#10B981") else android.graphics.Color.parseColor("#38BDF8")
@@ -210,8 +204,8 @@ object VRRenderer {
         }
 
         // Header Divider Line
-        val pDivL = VRMath.project3DTo2D(get3DPoint(0.04f, 0.16f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val pDivR = VRMath.project3DTo2D(get3DPoint(0.96f, 0.16f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val pDivL = VRMath.project3DTo2D(get3DPoint(0.04f, 0.16f), cameraPos, viewMatrix, width, height, fov)
+        val pDivR = VRMath.project3DTo2D(get3DPoint(0.96f, 0.16f), cameraPos, viewMatrix, width, height, fov)
         if (pDivL.isVisible && pDivR.isVisible) {
             drawScope.drawLine(
                 color = Color(0xFF334155),
@@ -226,7 +220,7 @@ object VRRenderer {
         val bTR = get3DPoint(0.96f, 0.20f)
         val bBR = get3DPoint(0.96f, 0.66f)
         val bBL = get3DPoint(0.04f, 0.66f)
-        val bodyPts = VRMath.projectClippedPolygon(listOf(bTL, bTR, bBR, bBL), cameraPos, pitch, yaw, roll, width, height, fov)
+        val bodyPts = VRMath.projectClippedPolygon(listOf(bTL, bTR, bBR, bBL), cameraPos, viewMatrix, width, height, fov)
 
         if (bodyPts.size >= 3) {
             val bodyPath = Path().apply {
@@ -254,9 +248,9 @@ object VRRenderer {
                 typeface = android.graphics.Typeface.SANS_SERIF
             }
 
-            val pLine1 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.32f), cameraPos, pitch, yaw, roll, width, height, fov)
-            val pLine2 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.44f), cameraPos, pitch, yaw, roll, width, height, fov)
-            val pLine3 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.56f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pLine1 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.32f), cameraPos, viewMatrix, width, height, fov)
+            val pLine2 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.44f), cameraPos, viewMatrix, width, height, fov)
+            val pLine3 = VRMath.project3DTo2D(get3DPoint(0.08f, 0.56f), cameraPos, viewMatrix, width, height, fov)
 
             if (pLine1.isVisible) nativeCanvas.drawText("• 가상 세계 3D 공간에 왜곡 없이 고정된 창입니다.", pLine1.screenX, pLine1.screenY, bodyPaint)
             if (pLine2.isVisible) nativeCanvas.drawText("• 고개를 돌려 시야를 이동해도 위치가 완벽히 유지됩니다.", pLine2.screenX, pLine2.screenY, subPaint)
@@ -290,7 +284,7 @@ object VRRenderer {
             val btBR = get3DPoint(u2, v2)
             val btBL = get3DPoint(u1, v2)
 
-            val btnPts = VRMath.projectClippedPolygon(listOf(btTL, btTR, btBR, btBL), cameraPos, pitch, yaw, roll, width, height, fov)
+            val btnPts = VRMath.projectClippedPolygon(listOf(btTL, btTR, btBR, btBL), cameraPos, viewMatrix, width, height, fov)
 
             if (btnPts.size >= 3) {
                 val btnPath = Path().apply {
@@ -311,7 +305,7 @@ object VRRenderer {
                 drawScope.drawPath(btnPath, color = btnBgColor)
                 drawScope.drawPath(btnPath, color = btnStrokeColor, style = Stroke(width = if (isHovered) 2.2f else 1.0f))
 
-                val pBtnCenter = VRMath.project3DTo2D(get3DPoint((u1 + u2) * 0.5f, (v1 + v2) * 0.5f + 0.04f), cameraPos, pitch, yaw, roll, width, height, fov)
+                val pBtnCenter = VRMath.project3DTo2D(get3DPoint((u1 + u2) * 0.5f, (v1 + v2) * 0.5f + 0.04f), cameraPos, viewMatrix, width, height, fov)
                 if (pBtnCenter.isVisible) {
                     val btnTextPaint = android.graphics.Paint().apply {
                         color = if (isHovered) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#F8FAFC")
@@ -336,9 +330,7 @@ object VRRenderer {
     private fun drawTrackedGreyHand(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
@@ -347,7 +339,7 @@ object VRRenderer {
     ) {
         if (!hand.isTracked) return
 
-        val pHand = VRMath.project3DTo2D(hand.position, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pHand = VRMath.project3DTo2D(hand.position, cameraPos, viewMatrix, width, height, fov)
         if (!pHand.isVisible || pHand.depth <= 0.1f) return
 
         val scale = (0.1f / pHand.depth) * width * 0.35f
@@ -361,7 +353,7 @@ object VRRenderer {
             val contourPath = Path()
             var firstPoint = true
             for (pt in hand.contourPoints) {
-                val proj = VRMath.project3DTo2D(pt, cameraPos, pitch, yaw, roll, width, height, fov)
+                val proj = VRMath.project3DTo2D(pt, cameraPos, viewMatrix, width, height, fov)
                 if (proj.isVisible) {
                     if (firstPoint) {
                         contourPath.moveTo(proj.screenX, proj.screenY)
@@ -395,12 +387,12 @@ object VRRenderer {
         }
 
         // 2. Skeletal Finger Bones & Joints
-        val pWrist = VRMath.project3DTo2D(hand.wristPosition, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pThumb = VRMath.project3DTo2D(hand.thumbTip, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pIndex = VRMath.project3DTo2D(hand.indexTip, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pMiddle = VRMath.project3DTo2D(hand.middleTip, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pRing = VRMath.project3DTo2D(hand.ringTip, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pPinky = VRMath.project3DTo2D(hand.pinkyTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pWrist = VRMath.project3DTo2D(hand.wristPosition, cameraPos, viewMatrix, width, height, fov)
+        val pThumb = VRMath.project3DTo2D(hand.thumbTip, cameraPos, viewMatrix, width, height, fov)
+        val pIndex = VRMath.project3DTo2D(hand.indexTip, cameraPos, viewMatrix, width, height, fov)
+        val pMiddle = VRMath.project3DTo2D(hand.middleTip, cameraPos, viewMatrix, width, height, fov)
+        val pRing = VRMath.project3DTo2D(hand.ringTip, cameraPos, viewMatrix, width, height, fov)
+        val pPinky = VRMath.project3DTo2D(hand.pinkyTip, cameraPos, viewMatrix, width, height, fov)
 
         val palmCenter = pHand
         val fingerTips = listOf(pThumb, pIndex, pMiddle, pRing, pPinky)
@@ -478,7 +470,7 @@ object VRRenderer {
         val ray = hand.laserRay
         if (ray != null && pIndex.isVisible) {
             val rayTarget = ray.getPoint(2.0f)
-            val pRayEnd = VRMath.project3DTo2D(rayTarget, cameraPos, pitch, yaw, roll, width, height, fov)
+            val pRayEnd = VRMath.project3DTo2D(rayTarget, cameraPos, viewMatrix, width, height, fov)
             if (pRayEnd.isVisible) {
                 drawScope.drawLine(
                     brush = Brush.linearGradient(
@@ -500,9 +492,7 @@ object VRRenderer {
     private fun drawQuestQuickSettingsWindow(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
@@ -512,14 +502,14 @@ object VRRenderer {
         val halfW = settings.width * 0.5f
         val halfH = settings.height * 0.5f
 
-        val centerProj = VRMath.project3DTo2D(anchor, cameraPos, pitch, yaw, roll, width, height, fov)
+        val centerProj = VRMath.project3DTo2D(anchor, cameraPos, viewMatrix, width, height, fov)
         if (!centerProj.isVisible || centerProj.depth <= 0.2f) return
 
         // 4 Corners of 3D Panel in World Space
-        val pTL = VRMath.project3DTo2D(anchor + Vector3(-halfW, halfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val pTR = VRMath.project3DTo2D(anchor + Vector3(halfW, halfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val pBR = VRMath.project3DTo2D(anchor + Vector3(halfW, -halfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val pBL = VRMath.project3DTo2D(anchor + Vector3(-halfW, -halfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val pTL = VRMath.project3DTo2D(anchor + Vector3(-halfW, halfH, 0f), cameraPos, viewMatrix, width, height, fov)
+        val pTR = VRMath.project3DTo2D(anchor + Vector3(halfW, halfH, 0f), cameraPos, viewMatrix, width, height, fov)
+        val pBR = VRMath.project3DTo2D(anchor + Vector3(halfW, -halfH, 0f), cameraPos, viewMatrix, width, height, fov)
+        val pBL = VRMath.project3DTo2D(anchor + Vector3(-halfW, -halfH, 0f), cameraPos, viewMatrix, width, height, fov)
 
         val panelPath = Path().apply {
             moveTo(pTL.screenX, pTL.screenY)
@@ -552,11 +542,11 @@ object VRRenderer {
         val nativeCanvas = drawScope.drawContext.canvas.nativeCanvas
 
         // 2. Window Header Bar (Status Info: Time, Battery, Title)
-        val pHeader = VRMath.project3DTo2D(anchor + Vector3(0f, halfH * 0.80f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val pHeader = VRMath.project3DTo2D(anchor + Vector3(0f, halfH * 0.80f, 0f), cameraPos, viewMatrix, width, height, fov)
         if (pHeader.isVisible) {
             // Header divider line
-            val pDivL = VRMath.project3DTo2D(anchor + Vector3(-halfW * 0.90f, halfH * 0.65f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-            val pDivR = VRMath.project3DTo2D(anchor + Vector3(halfW * 0.90f, halfH * 0.65f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pDivL = VRMath.project3DTo2D(anchor + Vector3(-halfW * 0.90f, halfH * 0.65f, 0f), cameraPos, viewMatrix, width, height, fov)
+            val pDivR = VRMath.project3DTo2D(anchor + Vector3(halfW * 0.90f, halfH * 0.65f, 0f), cameraPos, viewMatrix, width, height, fov)
             if (pDivL.isVisible && pDivR.isVisible) {
                 drawScope.drawLine(
                     color = Color(0x33475569),
@@ -574,7 +564,7 @@ object VRRenderer {
                 textAlign = android.graphics.Paint.Align.LEFT
                 typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             }
-            val pTitle = VRMath.project3DTo2D(anchor + Vector3(-halfW * 0.85f, halfH * 0.80f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pTitle = VRMath.project3DTo2D(anchor + Vector3(-halfW * 0.85f, halfH * 0.80f, 0f), cameraPos, viewMatrix, width, height, fov)
             if (pTitle.isVisible) {
                 nativeCanvas.drawText("Quick Settings", pTitle.screenX, pTitle.screenY, headerPaint)
             }
@@ -593,7 +583,7 @@ object VRRenderer {
                 textAlign = android.graphics.Paint.Align.RIGHT
                 typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.BOLD)
             }
-            val pStatus = VRMath.project3DTo2D(anchor + Vector3(halfW * 0.85f, halfH * 0.80f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pStatus = VRMath.project3DTo2D(anchor + Vector3(halfW * 0.85f, halfH * 0.80f, 0f), cameraPos, viewMatrix, width, height, fov)
             if (pStatus.isVisible) {
                 nativeCanvas.drawText("$batteryIcon ${settings.batteryPercent}%  •  ${settings.timeString}", pStatus.screenX, pStatus.screenY, statusPaint)
             }
@@ -612,10 +602,10 @@ object VRRenderer {
             val tHalfW = 0.22f
             val tHalfH = 0.14f
 
-            val tTL = VRMath.project3DTo2D(tileCenter + Vector3(-tHalfW, tHalfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-            val tTR = VRMath.project3DTo2D(tileCenter + Vector3(tHalfW, tHalfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-            val tBR = VRMath.project3DTo2D(tileCenter + Vector3(tHalfW, -tHalfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-            val tBL = VRMath.project3DTo2D(tileCenter + Vector3(-tHalfW, -tHalfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val tTL = VRMath.project3DTo2D(tileCenter + Vector3(-tHalfW, tHalfH, 0f), cameraPos, viewMatrix, width, height, fov)
+            val tTR = VRMath.project3DTo2D(tileCenter + Vector3(tHalfW, tHalfH, 0f), cameraPos, viewMatrix, width, height, fov)
+            val tBR = VRMath.project3DTo2D(tileCenter + Vector3(tHalfW, -tHalfH, 0f), cameraPos, viewMatrix, width, height, fov)
+            val tBL = VRMath.project3DTo2D(tileCenter + Vector3(-tHalfW, -tHalfH, 0f), cameraPos, viewMatrix, width, height, fov)
 
             val tilePath = Path().apply {
                 moveTo(tTL.screenX, tTL.screenY)
@@ -645,7 +635,7 @@ object VRRenderer {
             )
 
             // Text on tile
-            val tC = VRMath.project3DTo2D(tileCenter, cameraPos, pitch, yaw, roll, width, height, fov)
+            val tC = VRMath.project3DTo2D(tileCenter, cameraPos, viewMatrix, width, height, fov)
             if (tC.isVisible) {
                 val tileTitlePaint = android.graphics.Paint().apply {
                     color = android.graphics.Color.WHITE
@@ -677,7 +667,7 @@ object VRRenderer {
 
         for ((relX, id, label) in actionButtons) {
             val btnPos = anchor + Vector3(relX, -halfH * 0.18f, 0f)
-            val btnProj = VRMath.project3DTo2D(btnPos, cameraPos, pitch, yaw, roll, width, height, fov)
+            val btnProj = VRMath.project3DTo2D(btnPos, cameraPos, viewMatrix, width, height, fov)
             if (btnProj.isVisible) {
                 val isHovered = settings.hoveredElementId == id
                 val isPill = (id == "btn_record" || id == "btn_passthrough")
@@ -734,7 +724,7 @@ object VRRenderer {
         }
 
         // 5. Bottom Sub-Bar: [🧭 시점 정렬 (Recenter Spatial Anchor)]
-        val pRecenter = VRMath.project3DTo2D(anchor + Vector3(0f, -halfH * 0.65f, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val pRecenter = VRMath.project3DTo2D(anchor + Vector3(0f, -halfH * 0.65f, 0f), cameraPos, viewMatrix, width, height, fov)
         if (pRecenter.isVisible) {
             val isHovered = settings.hoveredElementId == "btn_recenter"
             val rWidth = scale * 2.6f
@@ -774,9 +764,7 @@ object VRRenderer {
     private fun drawQuestUniversalDock(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
@@ -787,13 +775,13 @@ object VRRenderer {
         val halfW = dock.width * 0.5f
         val halfH = dock.height * 0.5f
 
-        val centerProj = VRMath.project3DTo2D(anchor, cameraPos, pitch, yaw, roll, width, height, fov)
+        val centerProj = VRMath.project3DTo2D(anchor, cameraPos, viewMatrix, width, height, fov)
         if (!centerProj.isVisible || centerProj.depth <= 0.2f) return
 
-        val pTL = VRMath.project3DTo2D(anchor + Vector3(-halfW, halfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val pTR = VRMath.project3DTo2D(anchor + Vector3(halfW, halfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val pBR = VRMath.project3DTo2D(anchor + Vector3(halfW, -halfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
-        val pBL = VRMath.project3DTo2D(anchor + Vector3(-halfW, -halfH, 0f), cameraPos, pitch, yaw, roll, width, height, fov)
+        val pTL = VRMath.project3DTo2D(anchor + Vector3(-halfW, halfH, 0f), cameraPos, viewMatrix, width, height, fov)
+        val pTR = VRMath.project3DTo2D(anchor + Vector3(halfW, halfH, 0f), cameraPos, viewMatrix, width, height, fov)
+        val pBR = VRMath.project3DTo2D(anchor + Vector3(halfW, -halfH, 0f), cameraPos, viewMatrix, width, height, fov)
+        val pBL = VRMath.project3DTo2D(anchor + Vector3(-halfW, -halfH, 0f), cameraPos, viewMatrix, width, height, fov)
 
         val dockPath = Path().apply {
             moveTo(pTL.screenX, pTL.screenY)
@@ -828,7 +816,7 @@ object VRRenderer {
             val app = dock.apps[i]
             val appX = startX + i * appSlotWidth
             val appPos = anchor + Vector3(appX, 0f, 0f)
-            val pApp = VRMath.project3DTo2D(appPos, cameraPos, pitch, yaw, roll, width, height, fov)
+            val pApp = VRMath.project3DTo2D(appPos, cameraPos, viewMatrix, width, height, fov)
 
             if (pApp.isVisible) {
                 val isHovered = dock.hoveredAppId == app.id
@@ -955,9 +943,7 @@ object VRRenderer {
     private fun drawPassthroughGridOverlay(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float
@@ -967,8 +953,8 @@ object VRRenderer {
         val gridColor = Color(0x2200E5FF)
 
         for (x in -4..4) {
-            val pStart = VRMath.project3DTo2D(Vector3(x * 1.0f, floorY, 0.8f), cameraPos, pitch, yaw, roll, width, height, fov)
-            val pEnd = VRMath.project3DTo2D(Vector3(x * 1.0f, floorY, 6.0f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pStart = VRMath.project3DTo2D(Vector3(x * 1.0f, floorY, 0.8f), cameraPos, viewMatrix, width, height, fov)
+            val pEnd = VRMath.project3DTo2D(Vector3(x * 1.0f, floorY, 6.0f), cameraPos, viewMatrix, width, height, fov)
             if (pStart.isVisible && pEnd.isVisible) {
                 drawScope.drawLine(
                     color = gridColor,
@@ -986,9 +972,7 @@ object VRRenderer {
     private fun drawQuestTouchController(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
@@ -998,7 +982,7 @@ object VRRenderer {
     ) {
         if (!hand.isTracked) return
 
-        val pHand = VRMath.project3DTo2D(hand.position, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pHand = VRMath.project3DTo2D(hand.position, cameraPos, viewMatrix, width, height, fov)
         if (!pHand.isVisible) return
 
         val scale = (0.1f / pHand.depth) * width * 0.35f
@@ -1014,7 +998,7 @@ object VRRenderer {
             val contourPath = Path()
             var firstPoint = true
             for (pt in hand.contourPoints) {
-                val proj = VRMath.project3DTo2D(pt, cameraPos, pitch, yaw, roll, width, height, fov)
+                val proj = VRMath.project3DTo2D(pt, cameraPos, viewMatrix, width, height, fov)
                 if (proj.isVisible) {
                     if (firstPoint) {
                         contourPath.moveTo(proj.screenX, proj.screenY)
@@ -1039,12 +1023,12 @@ object VRRenderer {
         }
 
         // B. Draw Hand Bones & Skeletal Joints
-        val pWrist = VRMath.project3DTo2D(hand.wristPosition, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pIndex = VRMath.project3DTo2D(hand.indexTip, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pThumb = VRMath.project3DTo2D(hand.thumbTip, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pMiddle = VRMath.project3DTo2D(hand.middleTip, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pRing = VRMath.project3DTo2D(hand.ringTip, cameraPos, pitch, yaw, roll, width, height, fov)
-        val pPinky = VRMath.project3DTo2D(hand.pinkyTip, cameraPos, pitch, yaw, roll, width, height, fov)
+        val pWrist = VRMath.project3DTo2D(hand.wristPosition, cameraPos, viewMatrix, width, height, fov)
+        val pIndex = VRMath.project3DTo2D(hand.indexTip, cameraPos, viewMatrix, width, height, fov)
+        val pThumb = VRMath.project3DTo2D(hand.thumbTip, cameraPos, viewMatrix, width, height, fov)
+        val pMiddle = VRMath.project3DTo2D(hand.middleTip, cameraPos, viewMatrix, width, height, fov)
+        val pRing = VRMath.project3DTo2D(hand.ringTip, cameraPos, viewMatrix, width, height, fov)
+        val pPinky = VRMath.project3DTo2D(hand.pinkyTip, cameraPos, viewMatrix, width, height, fov)
 
         val palmCenter = pHand
 
@@ -1127,8 +1111,8 @@ object VRRenderer {
             val rayStart = hand.indexTip
             val rayTarget = ray.getPoint(2.2f)
 
-            val pRayStart = VRMath.project3DTo2D(rayStart, cameraPos, pitch, yaw, roll, width, height, fov)
-            val pRayEnd = VRMath.project3DTo2D(rayTarget, cameraPos, pitch, yaw, roll, width, height, fov)
+            val pRayStart = VRMath.project3DTo2D(rayStart, cameraPos, viewMatrix, width, height, fov)
+            val pRayEnd = VRMath.project3DTo2D(rayTarget, cameraPos, viewMatrix, width, height, fov)
 
             if (pRayStart.isVisible && pRayEnd.isVisible) {
                 // Glowing Laser Line (Soft gradient)
@@ -1162,9 +1146,7 @@ object VRRenderer {
     private fun drawSkyAndGrid(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float
@@ -1183,8 +1165,8 @@ object VRRenderer {
 
         // Longitudinal lines (Z from 0.5 to 16)
         for (x in -8..8) {
-            val pStart = VRMath.project3DTo2D(Vector3(x * 0.8f, floorY, 0.8f), cameraPos, pitch, yaw, roll, width, height, fov)
-            val pEnd = VRMath.project3DTo2D(Vector3(x * 0.8f, floorY, 16.0f), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pStart = VRMath.project3DTo2D(Vector3(x * 0.8f, floorY, 0.8f), cameraPos, viewMatrix, width, height, fov)
+            val pEnd = VRMath.project3DTo2D(Vector3(x * 0.8f, floorY, 16.0f), cameraPos, viewMatrix, width, height, fov)
 
             if (pStart.isVisible && pEnd.isVisible) {
                 drawScope.drawLine(
@@ -1198,8 +1180,8 @@ object VRRenderer {
 
         // Latitudinal lines
         for (z in 1..16) {
-            val pLeft = VRMath.project3DTo2D(Vector3(-6.4f, floorY, z.toFloat()), cameraPos, pitch, yaw, roll, width, height, fov)
-            val pRight = VRMath.project3DTo2D(Vector3(6.4f, floorY, z.toFloat()), cameraPos, pitch, yaw, roll, width, height, fov)
+            val pLeft = VRMath.project3DTo2D(Vector3(-6.4f, floorY, z.toFloat()), cameraPos, viewMatrix, width, height, fov)
+            val pRight = VRMath.project3DTo2D(Vector3(6.4f, floorY, z.toFloat()), cameraPos, viewMatrix, width, height, fov)
 
             if (pLeft.isVisible && pRight.isVisible) {
                 drawScope.drawLine(
@@ -1215,16 +1197,14 @@ object VRRenderer {
     private fun drawRhythmSaber(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
         blocks: List<SaberBlock>
     ) {
         for (block in blocks) {
-            val pCenter = VRMath.project3DTo2D(block.position, cameraPos, pitch, yaw, roll, width, height, fov)
+            val pCenter = VRMath.project3DTo2D(block.position, cameraPos, viewMatrix, width, height, fov)
             if (pCenter.isVisible) {
                 val sizeOnScreen = (block.size / pCenter.depth) * width * 0.45f
                 val blockColor = Color(block.color)
@@ -1273,16 +1253,14 @@ object VRRenderer {
     private fun drawPhysicsEntities(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
         entities: List<PhysicsEntity>
     ) {
         for (entity in entities) {
-            val p = VRMath.project3DTo2D(entity.position, cameraPos, pitch, yaw, roll, width, height, fov)
+            val p = VRMath.project3DTo2D(entity.position, cameraPos, viewMatrix, width, height, fov)
             if (p.isVisible) {
                 val radius = (entity.size / p.depth) * width * 0.35f
                 val color = Color(entity.color)
@@ -1331,9 +1309,7 @@ object VRRenderer {
     private fun drawSolarSystem(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
@@ -1346,7 +1322,7 @@ object VRRenderer {
                     y = sin(planet.orbitAngle * 2f) * 0.2f,
                     z = cos(planet.orbitAngle) * planet.distance + 1.0f
                 ),
-                cameraPos, pitch, yaw, roll, width, height, fov
+                cameraPos, viewMatrix, width, height, fov
             )
 
             if (p.isVisible) {
@@ -1378,9 +1354,7 @@ object VRRenderer {
     private fun drawTargetGallery(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
@@ -1389,7 +1363,7 @@ object VRRenderer {
         for (target in targets) {
             if (target.isHit) continue
 
-            val p = VRMath.project3DTo2D(target.position, cameraPos, pitch, yaw, roll, width, height, fov)
+            val p = VRMath.project3DTo2D(target.position, cameraPos, viewMatrix, width, height, fov)
             if (p.isVisible) {
                 val radius = (target.radius / p.depth) * width * 0.35f
                 val color = Color(target.color)
@@ -1419,16 +1393,14 @@ object VRRenderer {
     private fun drawParticles(
         drawScope: DrawScope,
         cameraPos: Vector3,
-        pitch: Float,
-        yaw: Float,
-        roll: Float,
+        viewMatrix: FloatArray,
         width: Float,
         height: Float,
         fov: Float,
         particles: List<VRParticle>
     ) {
         for (p in particles) {
-            val proj = VRMath.project3DTo2D(p.position, cameraPos, pitch, yaw, roll, width, height, fov)
+            val proj = VRMath.project3DTo2D(p.position, cameraPos, viewMatrix, width, height, fov)
             if (proj.isVisible) {
                 val size = (p.size / proj.depth).coerceIn(2f, 12f)
                 drawScope.drawCircle(

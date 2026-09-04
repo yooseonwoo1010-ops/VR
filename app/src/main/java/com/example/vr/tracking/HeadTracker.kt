@@ -5,40 +5,36 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.view.WindowManager
+import android.opengl.Matrix
 import android.view.Surface
+import android.view.WindowManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.*
 
 data class HeadOrientation(
-    val pitch: Float = 0f, // Looking Up (+) / Down (-) in radians
-    val yaw: Float = 0f,   // Looking Left (-) / Right (+) in radians
-    val roll: Float = 0f,  // Head Tilt in radians
+    val pitch: Float = 0f,
+    val yaw: Float = 0f,
+    val roll: Float = 0f,
     val pitchDeg: Float = 0f,
     val yawDeg: Float = 0f,
-    val rollDeg: Float = 0f
+    val rollDeg: Float = 0f,
+    val viewMatrix: FloatArray = FloatArray(16) { if (it % 5 == 0) 1f else 0f }
 )
 
-
 class HeadTracker(private val context: Context) : SensorEventListener {
-
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val rotationSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
         ?: sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
-        ?: sensorManager.getDefaultSensor(Sensor.TYPE_ORIENTATION)
-
+    
     private val _orientation = MutableStateFlow(HeadOrientation())
     val orientation: StateFlow<HeadOrientation> = _orientation.asStateFlow()
 
     private var isSensorEnabled = true
     private var isRegistered = false
 
-    // Offset for recentering (only yaw is recentered to maintain gravity alignment)
     private var yawOffset = 0f
-
-    // Touch drag offsets for manual flat-mode control
     private var manualYaw = 0f
     private var manualPitch = 0f
 
@@ -46,8 +42,8 @@ class HeadTracker(private val context: Context) : SensorEventListener {
     private var currentYaw = 0f
     private var currentRoll = 0f
 
-    private val rotationMatrix = FloatArray(9)
-    private val remappedMatrix = FloatArray(9)
+    private val rotationMatrix = FloatArray(16)
+    private val remappedMatrix = FloatArray(16)
     private val orientationValues = FloatArray(3)
 
     private var isFirstReading = true
@@ -70,9 +66,6 @@ class HeadTracker(private val context: Context) : SensorEventListener {
         isSensorEnabled = enabled
     }
 
-    /**
-     * Recalibrate center forward direction (Quest-like recenter button)
-     */
     fun recenter() {
         yawOffset = currentYaw
         manualYaw = 0f
@@ -80,9 +73,6 @@ class HeadTracker(private val context: Context) : SensorEventListener {
         updateOrientationState()
     }
 
-    /**
-     * Handle touch drag look-around for 2D flat mode or emulator
-     */
     fun onDrag(deltaX: Float, deltaY: Float, sensitivity: Float = 0.003f) {
         manualYaw += deltaX * sensitivity
         manualPitch = (manualPitch - deltaY * sensitivity).coerceIn(-1.4f, 1.4f)
@@ -91,7 +81,6 @@ class HeadTracker(private val context: Context) : SensorEventListener {
 
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null || !isSensorEnabled) return
-        val timestamp = event.timestamp
 
         if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR || event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR) {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
@@ -104,12 +93,12 @@ class HeadTracker(private val context: Context) : SensorEventListener {
 
             when (rotation) {
                 Surface.ROTATION_90 -> {
-                    axisX = SensorManager.AXIS_MINUS_Y
-                    axisY = SensorManager.AXIS_X
-                }
-                Surface.ROTATION_270 -> {
                     axisX = SensorManager.AXIS_Y
                     axisY = SensorManager.AXIS_MINUS_X
+                }
+                Surface.ROTATION_270 -> {
+                    axisX = SensorManager.AXIS_MINUS_Y
+                    axisY = SensorManager.AXIS_X
                 }
                 Surface.ROTATION_180 -> {
                     axisX = SensorManager.AXIS_MINUS_X
@@ -121,13 +110,7 @@ class HeadTracker(private val context: Context) : SensorEventListener {
                 }
             }
 
-            SensorManager.remapCoordinateSystem(
-                rotationMatrix,
-                axisX,
-                axisY,
-                remappedMatrix
-            )
-
+            SensorManager.remapCoordinateSystem(rotationMatrix, axisX, axisY, remappedMatrix)
             SensorManager.getOrientation(remappedMatrix, orientationValues)
 
             val rawYaw = orientationValues[0]
@@ -141,7 +124,6 @@ class HeadTracker(private val context: Context) : SensorEventListener {
                 yawOffset = rawYaw
                 isFirstReading = false
             } else {
-                // Shortest angular difference for yaw unwrapping to prevent jumps
                 var diffYaw = rawYaw - currentYaw
                 while (diffYaw < -Math.PI) diffYaw += (2 * Math.PI).toFloat()
                 while (diffYaw > Math.PI) diffYaw -= (2 * Math.PI).toFloat()
@@ -150,39 +132,21 @@ class HeadTracker(private val context: Context) : SensorEventListener {
                 currentPitch = rawPitch
                 currentRoll = rawRoll
             }
-
-            updateOrientationState()
-        } else if (event.sensor.type == Sensor.TYPE_ORIENTATION) {
-            val rawYaw = Math.toRadians(event.values[0].toDouble()).toFloat()
-            val rawPitch = -Math.toRadians(event.values[1].toDouble()).toFloat()
-            val rawRoll = Math.toRadians(event.values[2].toDouble()).toFloat()
-
-            if (isFirstReading) {
-                currentYaw = rawYaw
-                currentPitch = rawPitch
-                currentRoll = rawRoll
-                yawOffset = rawYaw
-                isFirstReading = false
-            } else {
-                var diffYaw = rawYaw - currentYaw
-                while (diffYaw < -Math.PI) diffYaw += (2 * Math.PI).toFloat()
-                while (diffYaw > Math.PI) diffYaw -= (2 * Math.PI).toFloat()
-                
-                currentYaw += diffYaw
-                currentPitch = rawPitch
-                currentRoll = rawRoll
-            }
-
             updateOrientationState()
         }
     }
 
     private fun updateOrientationState() {
-        // Do not scale angles! Scaling angles destroys the orthogonal rotation matrix and causes severe parallelogram skewing.
-        // The VR Window MUST be world-locked and aligned with physical gravity, so we ONLY offset the Yaw axis.
         val finalYaw = (currentYaw - yawOffset) + manualYaw
         val finalPitch = currentPitch + manualPitch
         val finalRoll = currentRoll
+        
+        val viewMatrix = FloatArray(16)
+        Matrix.setIdentityM(viewMatrix, 0)
+        
+        Matrix.rotateM(viewMatrix, 0, Math.toDegrees(-finalRoll.toDouble()).toFloat(), 0f, 0f, 1f)
+        Matrix.rotateM(viewMatrix, 0, Math.toDegrees(finalPitch.toDouble()).toFloat(), 1f, 0f, 0f)
+        Matrix.rotateM(viewMatrix, 0, Math.toDegrees(-finalYaw.toDouble()).toFloat(), 0f, 1f, 0f)
 
         _orientation.value = HeadOrientation(
             pitch = finalPitch,
@@ -190,10 +154,10 @@ class HeadTracker(private val context: Context) : SensorEventListener {
             roll = finalRoll,
             pitchDeg = Math.toDegrees(finalPitch.toDouble()).toFloat(),
             yawDeg = Math.toDegrees(finalYaw.toDouble()).toFloat(),
-            rollDeg = Math.toDegrees(finalRoll.toDouble()).toFloat()
+            rollDeg = Math.toDegrees(finalRoll.toDouble()).toFloat(),
+            viewMatrix = viewMatrix
         )
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }
-
