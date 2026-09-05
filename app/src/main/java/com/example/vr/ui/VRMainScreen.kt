@@ -73,6 +73,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
     val ipdMm by vrEngine.ipdMm.collectAsState()
     val fov by vrEngine.fov.collectAsState()
     val vrBoxWindow by vrEngine.vrBoxWindow.collectAsState()
+    val virtualWindow by vrEngine.virtualWindowManager.window.collectAsState()
     val isMenuOpen by vrEngine.isMenuOpen.collectAsState()
     val questSettings by vrEngine.questSettings.collectAsState()
     val questDock by vrEngine.questDock.collectAsState()
@@ -156,6 +157,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                 fov = fov,
                 experience = currentExperience,
                 vrBoxWindow = vrBoxWindow,
+                virtualWindow = virtualWindow,
                 isMenuOpen = isMenuOpen,
                 questSettings = questSettings,
                 questDock = questDock,
@@ -177,6 +179,7 @@ fun VRMainScreen(modifier: Modifier = Modifier) {
                 fov = fov,
                 experience = currentExperience,
                 vrBoxWindow = vrBoxWindow,
+                virtualWindow = virtualWindow,
                 isMenuOpen = isMenuOpen,
                 questSettings = questSettings,
                 questDock = questDock,

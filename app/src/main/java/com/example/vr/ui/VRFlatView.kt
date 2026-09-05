@@ -12,6 +12,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.rememberTextMeasurer
+import com.example.vr.model.VirtualWindow
 import androidx.compose.ui.unit.sp
 import com.example.vr.model.*
 import com.example.vr.tracking.HeadOrientation
@@ -22,6 +24,7 @@ fun VRFlatView(
     fov: Float,
     experience: VRExperience,
     vrBoxWindow: VRBoxWindowState,
+    virtualWindow: VirtualWindow,
     isMenuOpen: Boolean,
     questSettings: QuestQuickSettingsState,
     questDock: QuestDockState,
@@ -38,8 +41,9 @@ fun VRFlatView(
     onDragLookAround: (Float, Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val textMeasurer = rememberTextMeasurer()
     val centerCameraPos = Vector3(0f, 0f, 0f)
-    val isPassthrough = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
+        val isPassthrough = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
 
     Box(
         modifier = modifier
@@ -66,6 +70,8 @@ fun VRFlatView(
                 fov = fov,
                 experience = experience,
                 vrBoxWindow = vrBoxWindow,
+                        virtualWindow = virtualWindow,
+                        textMeasurer = textMeasurer,
                 questSettings = questSettings,
                 questDock = questDock,
                 menuCards = menuCards,

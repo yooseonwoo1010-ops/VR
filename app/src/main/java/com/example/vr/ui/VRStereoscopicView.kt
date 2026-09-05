@@ -11,6 +11,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.rememberTextMeasurer
+import com.example.vr.model.VirtualWindow
 import com.example.vr.model.*
 import com.example.vr.tracking.HeadOrientation
 
@@ -21,6 +23,7 @@ fun VRStereoscopicView(
     fov: Float,
     experience: VRExperience,
     vrBoxWindow: VRBoxWindowState,
+    virtualWindow: VirtualWindow,
     isMenuOpen: Boolean,
     questSettings: QuestQuickSettingsState,
     questDock: QuestDockState,
@@ -37,11 +40,12 @@ fun VRStereoscopicView(
     modifier: Modifier = Modifier
 ) {
     // Interpupillary distance in meters (e.g. 64mm -> 0.064m)
+        val textMeasurer = rememberTextMeasurer()
     val ipdMeters = (ipdMm / 1000f) * 0.5f
     val leftEyeCameraPos = Vector3(-ipdMeters, 0f, 0f)
     val rightEyeCameraPos = Vector3(ipdMeters, 0f, 0f)
 
-    val isPassthrough = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
+        val isPassthrough = vrBoxWindow.isPassthroughActive || questSettings.isPassthroughEnabled || experience == VRExperience.PASSTHROUGH_MR
 
     Box(
         modifier = modifier
@@ -67,6 +71,8 @@ fun VRStereoscopicView(
                         fov = fov,
                         experience = experience,
                         vrBoxWindow = vrBoxWindow,
+                        virtualWindow = virtualWindow,
+                        textMeasurer = textMeasurer,
                         questSettings = questSettings,
                         questDock = questDock,
                         menuCards = menuCards,
@@ -112,6 +118,8 @@ fun VRStereoscopicView(
                         fov = fov,
                         experience = experience,
                         vrBoxWindow = vrBoxWindow,
+                        virtualWindow = virtualWindow,
+                        textMeasurer = textMeasurer,
                         questSettings = questSettings,
                         questDock = questDock,
                         menuCards = menuCards,

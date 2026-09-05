@@ -22,6 +22,8 @@ import kotlin.math.*
 import kotlin.random.Random
 
 class VREnvironmentEngine(private val context: Context) {
+    val virtualWindowManager = VirtualWindowManager()
+
 
     // Real Phone Battery & Charging State
     private var realBatteryPercent: Int = 100
@@ -335,59 +337,49 @@ class VREnvironmentEngine(private val context: Context) {
     }
 
     /**
-     * Updates Gaze Raycasting & Interactive selection on the 3D World-Anchored Spatial Window
+     * Updates Gaze Raycasting & Interactive selection on the 3D World-Anchored Virtual Window
      */
     private fun updateVRBoxWindow(
         dt: Float,
         headOrientation: HeadOrientation
     ) {
-        val currentWin = _vrBoxWindow.value
-        if (!currentWin.isVisible) return
+        val win = virtualWindowManager.window.value
+        if (!win.isVisible) return
 
         val forwardDir = VRMath.getForwardVector(headOrientation.pitch, headOrientation.yaw, headOrientation.roll)
         val gazeRay = Ray3D(origin = Vector3(0f, 0f, 0f), direction = forwardDir)
 
-        val windowPos = currentWin.anchorPos
-        val quadNormal = (Vector3(0f, 0f, 0f) - windowPos).normalized()
+        val windowPos = win.position
+        val quadNormal = win.normalVector
         val hitT = VRMath.rayIntersectsQuad(
             ray = gazeRay,
             quadCenter = windowPos,
             quadNormal = quadNormal,
-            width = currentWin.width,
-            height = currentWin.height
+            width = win.width,
+            height = win.height
         )
 
         var newHoveredId: String? = null
         if (hitT != null) {
             val hitPoint = gazeRay.getPoint(hitT)
-            // Compute quad local coordinates
-            val rightVec = Vector3(-windowPos.z, 0f, windowPos.x).normalized()
-            val upVec = quadNormal.cross(rightVec).normalized()
-
             val rel = hitPoint - windowPos
-            val localX = rel.dot(rightVec)
-            val localY = rel.dot(upVec)
+            val localU = (rel.dot(win.rightVector) / win.width) + 0.5f
+            val localV = 0.5f - (rel.dot(win.upVector) / win.height)
 
-            val halfW = currentWin.width * 0.5f
-            val halfH = currentWin.height * 0.5f
-
-            // Buttons located in lower section of the 3D window
-            if (localY in (-halfH * 0.95f)..(-halfH * 0.35f)) {
+            // Buttons: RECENTER (u 0.10..0.48, v 0.72..0.92) & CLOSE (u 0.52..0.90, v 0.72..0.92)
+            if (localV in 0.72f..0.92f) {
                 when {
-                    localX in (-halfW * 0.92f)..(-halfW * 0.46f) -> newHoveredId = "btn_recenter"
-                    localX in (-halfW * 0.46f)..0.0f -> newHoveredId = "btn_passthrough"
-                    localX in 0.0f..(halfW * 0.46f) -> newHoveredId = "btn_ipd"
-                    localX in (halfW * 0.46f)..(halfW * 0.92f) -> newHoveredId = "btn_proceed"
+                    localU in 0.10f..0.48f -> newHoveredId = "btn_recenter"
+                    localU in 0.52f..0.90f -> newHoveredId = "btn_close"
                 }
             }
         }
 
-        var newDwell = currentWin.gazeDwellProgress
+        var newDwell = win.gazeDwellProgress
         if (newHoveredId != null) {
-            if (newHoveredId == currentWin.hoveredButtonId) {
-                newDwell += dt * 0.9f // ~1.1 seconds dwell to click
+            if (newHoveredId == win.hoveredButtonId) {
+                newDwell += dt * 0.95f // ~1.05s dwell to activate
                 if (newDwell >= 1.0f) {
-                    // Trigger action on dwell completion
                     executeButtonAction(newHoveredId, headOrientation)
                     newDwell = 0f
                 }
@@ -396,15 +388,10 @@ class VREnvironmentEngine(private val context: Context) {
                 triggerHaptic(20)
             }
         } else {
-            newDwell = (newDwell - dt * 2.0f).coerceAtLeast(0f)
+            newDwell = (newDwell - dt * 2.5f).coerceAtLeast(0f)
         }
 
-        _vrBoxWindow.value = currentWin.copy(
-            hoveredButtonId = newHoveredId,
-            gazeDwellProgress = newDwell.coerceIn(0f, 1f),
-            ipdMm = _ipdMm.value,
-            isDisplayStereo = (_displayMode.value == VRDisplayMode.CARDBOARD_VR)
-        )
+        virtualWindowManager.setHoverState(newHoveredId, newDwell.coerceIn(0f, 1f))
     }
 
     /**
@@ -414,8 +401,12 @@ class VREnvironmentEngine(private val context: Context) {
         when (buttonId) {
             "btn_recenter" -> {
                 recenterVRWindow(headOrientation)
-                _lastActionText.value = "🧭 시점 정렬 완료"
                 triggerHaptic(50)
+            }
+            "btn_close" -> {
+                virtualWindowManager.closeWindow()
+                _lastActionText.value = "✕ 가상 창을 닫았습니다. 시점 정렬 시 다시 열립니다."
+                triggerHaptic(40)
             }
             "btn_passthrough" -> {
                 togglePassthrough()
@@ -483,10 +474,14 @@ class VREnvironmentEngine(private val context: Context) {
     /**
      * Smoothly recenters the 3D window in front of current gaze direction
      */
-    fun recenterVRWindow(headOrientation: HeadOrientation) {
+        fun recenterVRWindow(headOrientation: HeadOrientation) {
         val forwardDir = VRMath.getForwardVector(headOrientation.pitch * 0.5f, headOrientation.yaw, 0f)
         val newAnchor = forwardDir * 2.0f
         _vrBoxWindow.value = _vrBoxWindow.value.copy(anchorPos = newAnchor)
+        
+        val actualForward = VRMath.getForwardVector(headOrientation.pitch, headOrientation.yaw, headOrientation.roll)
+        virtualWindowManager.placeVirtualWindowOnce(com.example.vr.model.Vector3(0f, 0f, 0f), actualForward)
+        
         spawnBurstParticles(newAnchor, 0xFF60A5FA, 20)
     }
 
